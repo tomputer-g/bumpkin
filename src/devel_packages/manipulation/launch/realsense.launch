@@ -1,0 +1,40 @@
+<launch>
+    <arg name="rs_initial_reset"  default="false" doc="whether to reset camera before streaming, useful if the camera got into a bad state in the last session" />
+
+    <!-- REALSENSE D415 -->
+    <include file="$(find realsense2_camera)/launch/rs_camera.launch">
+          <arg name="infra_width" value="848"/>
+          <arg name="infra_height" value="480"/>
+          <arg name="depth_width" value="848"/>
+          <arg name="depth_height" value="480"/>
+          <arg name="color_width" value="1280"/>
+          <arg name="color_height" value="720"/>
+
+          <!-- The D415 does not have an IMU, so the accel and gyro related arguments are removed -->
+
+          <arg name="enable_infra1" value="true"/>
+          <arg name="enable_infra2" value="true"/>
+          <arg name="enable_color" value="true"/>
+          <arg name="enable_depth" value="true"/>
+
+          <arg name="color_fps" value="15"/>
+          <arg name="depth_fps" value="15"/>
+          <arg name="infra_fps" value="15"/>
+
+          <!-- publish depth streams aligned to other streams -->
+          <arg name="align_depth" value="true"/>
+
+          <!-- enable_sync and filters remain the same as they are not IMU dependent -->
+          <arg name="enable_sync" value="true"/>
+          <arg name="filters" value="spatial,pointcloud"/>
+
+          <!-- Configuration for allow_no_texture_points remains unchanged -->
+          <arg name="allow_no_texture_points" value="false"/>
+
+          <!-- initial_reset remains the same -->
+          <arg name="initial_reset" value="$(arg rs_initial_reset)"/>
+
+          <!-- json_file_path can still be included if there are specific presets for D415 -->
+          <!-- <arg name="json_file_path" value="$(arg rs_initial_preset)" /> -->
+     </include>
+</launch>

@@ -1,10 +1,12 @@
 <launch>
     <!-- By default, we will load or override the robot_description -->
-    <arg name="load_robot_description" default="true"/>
+    <!-- <arg name="load_robot_description" default="true"/>
     <include file="$(find panda_moveit_config)/launch/move_group.launch" pass_all_args="true">
         <arg name="allow_trajectory_execution" value="true" />
         <arg name="info" value="true" />
-    </include>
+    </include> -->
+
+    <include file="$(find manipulation)/launch/moveit.launch" />
 
     <node name="dummy_target_pub" pkg="bumpkin" type="dummy_perception.py" output="screen" />
 

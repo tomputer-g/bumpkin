@@ -69,22 +69,26 @@ def main():
             # print("asdf")
             # Convert images to numpy arrays
             depth_image = np.asanyarray(depth_frame.get_data())
-            color_image = np.asanyarray(color_frame.get_data())
+            color_image_orig = np.asanyarray(color_frame.get_data())
 
             # Apply colormap on depth image
             depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET)
 
             # Stack both images horizontally
-            images = np.hstack((color_image, depth_colormap))
-            
-            rgb_frame = mp.Image(image_format=mp.ImageFormat.SRGB, data=color_image)
+            color_image_cvt = cv2.cvtColor(color_image_orig, cv2.COLOR_BGR2RGB)
+            rgb_frame = mp.Image(image_format=mp.ImageFormat.SRGB, data=color_image_cvt)
             model = MediapipeWrapper()
             centroids = model.predict(rgb_frame)
+            print(centroids)
             for centroid in centroids:
                 x, y = int(centroid[0] * WIDTH), int(centroid[1] * HEIGHT)
                 print("Hand centroid at: ({}, {})".format(x, y))
                 depth_value = depth_image[y, x] #test this
                 print("Depth at centroid: {}".format(depth_value))
+                cv2.circle(color_image_orig, (x, y), 5, (0, 255, 0), 2)
+                cv2.putText(color_image_orig, f'Depth: {depth_value}', (x + 10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
+                
+            images = np.hstack((color_image_orig, depth_colormap))
 
             # Show images
             cv2.namedWindow('RealSense', cv2.WINDOW_NORMAL)

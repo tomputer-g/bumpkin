@@ -2,10 +2,10 @@
 import sys
 sys.path.append("/home/ros_ws")
 from bumpkin_moveit_class import BKMoveItPlanner
-
+import numpy as np
 import rospy
 from geometry_msgs.msg import Point, Pose
-import copy
+from autolab_core import RigidTransform
 
 class FistTracker(object):
     def __init__(self):
@@ -28,25 +28,55 @@ class FistTracker(object):
         pose_goal.orientation.y = 0.80840715
         pose_goal.orientation.z = 0.00958253
         pose_goal.orientation.w = 0.58844988
+
+        # Direction
+        current_pose = self.planner.fa.get_pose().translation
+        direction = np.array(pose_goal.position) - np.array(current_pose)
+        distance = np.linalg.norm(direction)
         
-        # Convert pose to moveit frame
-        pose_goal_moveit = self.planner.get_moveit_pose_given_frankapy_pose(pose_goal)
+        if distance > 0:
+            # Normalize
+            direction = direction / distance
+
+            # go slower if its super close to target
+            speed_factor = min(1.0, distance / 0.1)  # Full speed beyond 10cm
+            step_size = 0.05 * speed_factor  # 5cm max step size
+            
+            # New position
+            new_position = current_pose + direction * step_size
+
+            # Create a RigidTransform object with the position and orientation
+            new_pose = RigidTransform(
+                translation=new_position,
+                rotation=RigidTransform.rotation_from_quaternion([
+                    pose_goal.orientation.w,
+                    pose_goal.orientation.x,
+                    pose_goal.orientation.y,
+                    pose_goal.orientation.z
+                ])
+            )
+            
+            # Direct control through FrankaArm API
+            self.planner.fa.goto_pose(
+                new_pose,
+                duration=0.1,  # Short duration for responsive movement
+                dynamic=True,
+                buffer_time=0
+            )
+            rospy.loginfo(f"DMove to: [{new_position[0]:.3f}, {new_position[1]:.3f}, {new_position[2]:.3f}]")
         
-        # Plan a straight line motion to the goal
+        # # Convert pose to moveit frame
+        # pose_goal_moveit = self.planner.get_moveit_pose_given_frankapy_pose(pose_goal)
+        
+        # # Plan a straight line motion to the goal
         # plan = self.planner.get_straight_plan_given_pose(pose_goal_moveit)
 
-        waypoints = []
-        waypoints.append(copy.deepcopy(pose_goal_moveit))
-        (plan, fraction) = self.planner.group.compute_cartesian_path(
-            waypoints, 0.01, 0  # waypoints to follow  # eef_step
-        )  # jump_threshold
-        self.planner.group.execute(plan, wait=True)
         
-        # Log info
-        rospy.loginfo(f"Received target position: x={msg.x}, y={msg.y}, z={msg.z}")
-        rospy.loginfo("Path planning completed")
+        # # Log info
+        # rospy.loginfo(f"Received target position: x={msg.x}, y={msg.y}, z={msg.z}")
+        # rospy.loginfo("Path planning completed")
         
-        # Execute the plan (uncomment when ready for actual execution)
+        # # Execute the plan (uncomment when ready for actual execution)
         # self.planner.execute_plan(plan)
 
     def shutdown(self):

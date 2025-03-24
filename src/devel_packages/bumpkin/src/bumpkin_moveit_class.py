@@ -147,29 +147,29 @@ class BKMoveItPlanner():
         rate = rospy.Rate(50)
         self.group.execute(interpolated_traj, wait=True)
         rate.sleep()
-        # # To ensure skill doesn't end before completing trajectory, make the buffer time much longer than needed
-        # self.fa.goto_joints(interpolated_traj[1], duration=5, dynamic=True, buffer_time=20)
-        # init_time = rospy.Time.now().to_time()
-        # for i in range(2, interpolated_traj.shape[0]):
-        #     traj_gen_proto_msg = JointPositionSensorMessage(
-        #         id=i, timestamp=rospy.Time.now().to_time() - init_time, 
-        #         joints=interpolated_traj[i]
-        #     )
-        #     ros_msg = make_sensor_group_msg(
-        #         trajectory_generator_sensor_msg=sensor_proto2ros_msg(
-        #             traj_gen_proto_msg, SensorDataMessageType.JOINT_POSITION)
-        #     )
-        #     self.pub.publish(ros_msg)
-        #     rate.sleep()
+        # To ensure skill doesn't end before completing trajectory, make the buffer time much longer than needed
+        self.fa.goto_joints(interpolated_traj[1], duration=5, dynamic=True, buffer_time=20)
+        init_time = rospy.Time.now().to_time()
+        for i in range(2, interpolated_traj.shape[0]):
+            traj_gen_proto_msg = JointPositionSensorMessage(
+                id=i, timestamp=rospy.Time.now().to_time() - init_time, 
+                joints=interpolated_traj[i]
+            )
+            ros_msg = make_sensor_group_msg(
+                trajectory_generator_sensor_msg=sensor_proto2ros_msg(
+                    traj_gen_proto_msg, SensorDataMessageType.JOINT_POSITION)
+            )
+            self.pub.publish(ros_msg)
+            rate.sleep()
 
-        # # Stop the skill
-        # # Alternatively can call fa.stop_skill()
-        # term_proto_msg = ShouldTerminateSensorMessage(timestamp=rospy.Time.now().to_time() - init_time, should_terminate=True)
-        # ros_msg = make_sensor_group_msg(
-        #     termination_handler_sensor_msg=sensor_proto2ros_msg(
-        #         term_proto_msg, SensorDataMessageType.SHOULD_TERMINATE)
-        #     )
-        # self.pub.publish(ros_msg)
+        # Stop the skill
+        # Alternatively can call fa.stop_skill()
+        term_proto_msg = ShouldTerminateSensorMessage(timestamp=rospy.Time.now().to_time() - init_time, should_terminate=True)
+        ros_msg = make_sensor_group_msg(
+            termination_handler_sensor_msg=sensor_proto2ros_msg(
+                term_proto_msg, SensorDataMessageType.SHOULD_TERMINATE)
+            )
+        self.pub.publish(ros_msg)
     
     # Test Functions
     def unit_test_joint(self, execute = False, guided = False):

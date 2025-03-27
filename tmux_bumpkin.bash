@@ -1,5 +1,12 @@
 #! /bin/bash
 
+##### LICENSE #####
+# © Bumpkin 2025 ©
+# Using this script means every user agrees to give the author (@ranais) free food
+# for the rest of his life. This is a legally binding contract.
+# If you do not agree to these terms, may your hand-eye calibration be fkd
+###################
+
 SESSION="bumpkin"
 
 # Check if the session already exists

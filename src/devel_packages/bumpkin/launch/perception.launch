@@ -1,0 +1,5 @@
+<launch>
+    <include file="$(find manipulation)/launch/realsense.launch">
+    </include>
+    <node name="new_perception_node" pkg="bumpkin" type="new_hand_landmarker.py" output="screen"/>
+</launch>

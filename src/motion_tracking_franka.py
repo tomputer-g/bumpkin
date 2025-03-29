@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import sys
 sys.path.append("/home/ros_ws")
-from bumpkin_moveit_class import BKMoveItPlanner
+from src.devel_packages.manipulation.src.moveit_class import MoveItPlanner
 
 import rospy
 from geometry_msgs.msg import Point, Pose
@@ -9,7 +9,7 @@ import copy
 
 class FistTracker(object):
     def __init__(self):
-        self.planner = BKMoveItPlanner()
+        self.planner = MoveItPlanner()
 
         self.latest_target = None
         self.is_executing = False

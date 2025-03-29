@@ -21,9 +21,6 @@ class FrankaTrajectoryExecutor:
         self.current_pose = self.fa.get_pose()
 
         # EE orientation
-        # quaternion = [0.01039112, 0.80840715, 0.00958253, 0.58844988]
-        # orientation = Rotation.from_quat(quaternion)
-        # self.default_orientation = orientation.as_matrix()
         self.default_orientation = np.array([[0.42156439, -0.011119, 0.90672841],
                                     [-0.01462131,-0.99986855,-0.00546339],
                                     [ 0.90666997,-0.01095438,-0.42167967]])
@@ -66,7 +63,6 @@ class FrankaTrajectoryExecutor:
         rospy.loginfo(f"New target received: [{target_position[0]:.4f}, {target_position[1]:.4f}, {target_position[2]:.4f}]")
     
     def execute_trajectory(self):
-
         if not self.new_target_received:
             return
         
@@ -74,23 +70,69 @@ class FrankaTrajectoryExecutor:
         self.new_target_received = False
         
         try:
-            target_transform = RigidTransform(
-                rotation=self.default_orientation,
-                translation=self.current_target,
-                from_frame='franka_tool',
-                to_frame='world'
-            )
+            current_position = self.fa.get_pose().translation
+            target_position = self.current_target
             
-            rospy.loginfo(f"Moving to target: {self.current_target}")
+            distance = np.linalg.norm(target_position - current_position)
             
-            self.fa.goto_pose(
-                target_transform,
-                duration=0.2, #sec
-                use_impedance=True,
-                cartesian_impedances=[600.0, 600.0, 600.0, 50.0, 50.0, 50.0]
-            )
+            base_duration = 1.5  # minimum duration in seconds
+            distance_factor = 2.0  # seconds per meter of travel
+            duration = base_duration + distance * distance_factor
             
-            rospy.sleep(0.1)
+            duration = min(duration, 4.0)
+            
+            rospy.loginfo(f"Moving to target: {self.current_target} (distance: {distance:.3f}m, duration: {duration:.2f}s)")
+            
+            # For longer movements, use intermediate waypoints
+            if distance > 0.15: 
+                rospy.loginfo("Using intermediate waypoints for smoother motion")
+                
+                num_waypoints = max(2, int(distance * 10))  # More waypoints for longer distances
+                
+                # Use cubic interpolation for position (smoother acceleration/deceleration)
+                t_values = np.linspace(0, 1, num_waypoints)
+                
+                # Apply cubic ease-in/ease-out function
+                # This creates a smoother acceleration and deceleration profile
+                t_smooth = t_values**2 * (3 - 2 * t_values)
+                
+                # Interpolate positions
+                waypoints = []
+                for t in t_smooth:
+                    pos = current_position + t * (target_position - current_position)
+                    transform = RigidTransform(
+                        rotation=self.default_orientation,
+                        translation=pos,
+                        from_frame='franka_tool',
+                        to_frame='world'
+                    )
+                    waypoints.append((transform, duration / num_waypoints))
+
+                for i, (waypoint, waypoint_duration) in enumerate(waypoints):
+                    rospy.loginfo(f"Executing waypoint {i+1}/{len(waypoints)}")
+                    self.fa.goto_pose(
+                        waypoint,
+                        duration=waypoint_duration,
+                        use_impedance=True,
+                        cartesian_impedances=[600.0, 600.0, 600.0, 50.0, 50.0, 50.0]
+                    )
+            else:
+                # For shorter movements, just go to pose
+                target_transform = RigidTransform(
+                    rotation=self.default_orientation,
+                    translation=target_position,
+                    from_frame='franka_tool',
+                    to_frame='world'
+                )
+
+                pos_impedance = max(300.0, min(600.0, 600.0 - distance * 1000))
+                
+                self.fa.goto_pose(
+                    target_transform,
+                    duration=duration,
+                    use_impedance=True,
+                    cartesian_impedances=[pos_impedance, pos_impedance, pos_impedance, 50.0, 50.0, 50.0]
+                )
             
             rospy.loginfo(f"Reached target position")
             

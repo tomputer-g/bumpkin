@@ -3,6 +3,8 @@ import rospy
 from geometry_msgs.msg import Point
 import numpy as np
 import sys
+import threading
+from motion_tracking_franka import FrankaTrajectoryExecutor
 
 class GenerateDummyTraj(object):
     def __init__(self, pts):
@@ -49,17 +51,25 @@ class GenerateDummyTraj(object):
         rospy.loginfo("Gracefully shutting down")
 
 if __name__ == '__main__':
-    rospy.init_node('dummy_perception_node', anonymous=False)
+    rospy.init_node('dummy_trajectory', anonymous=False)
     pt1 = np.array([0.42, -0.29, 0.58])
     pt2 = np.array([0.47, 0.097, 0.51]) # [-0.02491262  0.83750965  0.030964    0.54497097]
     pt3 = np.array([0.52631634, -0.05520262, 0.3502983 ]) # [ 0.03240049  0.84828503 -0.00749196  0.52849009]
     traj = np.stack([pt1, pt2, pt3])
 
-    temp = GenerateDummyTraj(traj)
-    rospy.on_shutdown(temp.shutdown)
+    dummy_traj = GenerateDummyTraj(traj)
+
+    franka_executor = FrankaTrajectoryExecutor()
+
+    rospy.on_shutdown(dummy_traj.shutdown)
+    rospy.on_shutdown(franka_executor.shutdown)
+
+    thread = threading.Thread(target=franka_executor.run)
+    thread.daemon = True
+    thread.start()
 
     try:
         while not rospy.is_shutdown():
-            temp.pub_target()
+            dummy_traj.pub_target()
     except rospy.ROSInterruptException:
         rospy.loginfo("Exiting")

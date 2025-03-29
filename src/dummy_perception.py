@@ -12,7 +12,7 @@ class GenerateDummyTraj(object):
         self.i = 0
         self.dir = 1
         self.target_pub = rospy.Publisher('/target_pos', Point, queue_size=10)
-        self.rate = rospy.Rate(1) # 1hz
+        self.rate = rospy.Rate(5) # 1hz
 
         if len(pts) <= 1:
             rospy.logerr("Need at least 2 points to interpolate traj")

@@ -9,7 +9,7 @@ from scipy.spatial.transform import Rotation
 class FrankaTrajectoryExecutor:
     def __init__(self):
 
-        self.rate = rospy.Rate(100)  # 1000Hz control loop
+        self.rate = rospy.Rate(1000)  # 1000Hz control loop
         
         # Initialize
         rospy.loginfo("Initializing FrankaArm...")

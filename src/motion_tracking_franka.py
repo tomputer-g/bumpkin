@@ -112,7 +112,7 @@ class FrankaTrajectoryExecutor:
                     rospy.loginfo(f"Executing waypoint {i+1}/{len(waypoints)}")
                     self.fa.goto_pose(
                         waypoint,
-                        duration=waypoint_duration,
+                        duration=float(waypoint_duration),
                         use_impedance=True,
                         cartesian_impedances=[600.0, 600.0, 600.0, 50.0, 50.0, 50.0]
                     )
@@ -129,7 +129,7 @@ class FrankaTrajectoryExecutor:
                 
                 self.fa.goto_pose(
                     target_transform,
-                    duration=duration,
+                    duration=float(duration),
                     use_impedance=True,
                     cartesian_impedances=[pos_impedance, pos_impedance, pos_impedance, 50.0, 50.0, 50.0]
                 )

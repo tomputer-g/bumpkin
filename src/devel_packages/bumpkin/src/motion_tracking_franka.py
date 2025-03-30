@@ -2,14 +2,19 @@
 import rospy
 from geometry_msgs.msg import Point
 import numpy as np
-from frankapy import FrankaArm
+from frankapy import FrankaArm, SensorDataMessageType
 from autolab_core import RigidTransform
 from scipy.spatial.transform import Rotation
+from frankapy import FrankaConstants as FC
+from frankapy.proto_utils import sensor_proto2ros_msg, make_sensor_group_msg
+from frankapy.proto import PosePositionSensorMessage, ShouldTerminateSensorMessage
+from franka_interface_msgs.msg import SensorDataGroup
 
 class FrankaTrajectoryExecutor:
     def __init__(self):
 
-        self.rate = rospy.Rate(1000)  # 1000Hz control loop
+        self.rate = rospy.Rate(50)  # 50Hz control loop
+        self.id = 0
         
         # Initialize
         rospy.loginfo("Initializing FrankaArm...")
@@ -26,29 +31,46 @@ class FrankaTrajectoryExecutor:
                                     [ 0.90666997,-0.01095438,-0.42167967]])
         
         self.target_sub = rospy.Subscriber('/target_pos', Point, self.target_callback)
+
+        # self.fa_sensor_pub = rospy.Publisher(FC.DEFAULT_SENSOR_PUBLISHER_TOPIC, SensorDataGroup, queue_size=1000)
+
+        # current = self.fa.get_pose()
+        # self.fa.goto_pose(current, duration=5, dynamic=True, buffer_time=10, cartesian_impedances=[600.0, 600.0, 600.0, 50.0, 50.0, 50.0])
+        # self.init_time = rospy.Time.now().to_time()
         
         # Safety limit distance
-        self.max_position_change = 0.10  # 40cm
+        self.max_position_change = 0.10  # 20cm
         
         rospy.loginfo("Franka ready.")      
     
     def target_callback(self, msg):
         # Callback for receiving new target positions
+
+        # limits
+        # Tra: [ 0.37531122 -0.31646363  0.6887249 ] top left
+        # Tra: [ 0.44450838 -0.30382788  0.18063057] bot left 
+        # Tra: [0.30388335 0.27008619 0.75117503] top right
+        # Tra: [0.32392089 0.35606499 0.24398415] bot right
+
+        # Tra: [ 0.60660365 -0.24438622  0.56997307] outwards
+        # Tra: [ 0.28004865 -0.2835988   0.59593051] inwards
+        # [z, x, y]
+        # HOME_POSE = RigidTransform(rotation=np.array([
+        #     [1, 0, 0],
+        #     [0, -1, 0],
+        #     [0, 0, -1],
+        # ]), translation=np.array([0.3069, 0, 0.4867]),
+        # from_frame='franka_tool', to_frame='world')
+        if np.abs(msg.y) > 0.3 or msg.z < 0.2 or msg.z > 0.7 or msg.x < 0.25 or msg.x > 0.55: 
+            rospy.logwarn("Target outside of workspace bounds, ignoring")
+            return
  
         if self.executing_trajectory:
             rospy.logwarn("Received new target while executing trajectory, skip")
             return
         
         target_position = np.array([msg.x, msg.y, msg.z])
-        
-        if self.current_target is not None:
 
-            distance = np.linalg.norm(target_position - self.current_target)
-            
-            # If the target hasn't changed significantly, ignore
-            if distance < 0.01:  # 1cm threshold
-                return
-        
         # Safety check - limit maximum position change
         current_position = self.fa.get_pose().translation
         distance_to_target = np.linalg.norm(target_position - current_position)
@@ -57,6 +79,18 @@ class FrankaTrajectoryExecutor:
             rospy.logwarn(f"Target position too far ({distance_to_target:.2f}m). Limiting movement to {self.max_position_change}m.")
             direction = (target_position - current_position) / distance_to_target
             target_position = current_position + direction * self.max_position_change
+        
+        if self.current_target is not None:
+
+            distance = np.linalg.norm(target_position - self.current_target)
+            
+            # If the target hasn't changed significantly, ignore
+            if distance < 0.05:  # 5cm threshold
+                return
+            
+            # elif self.executing_trajectory:
+            #     rospy.logwarn(f"New target received. Replanning to new target")
+            #     self.fa.stop_skill()
         
         self.current_target = target_position
         self.new_target_received = True
@@ -131,19 +165,38 @@ class FrankaTrajectoryExecutor:
                     target_transform,
                     duration=float(duration),
                     use_impedance=True,
-                    cartesian_impedances=[pos_impedance, pos_impedance, pos_impedance, 50.0, 50.0, 50.0]
+                    cartesian_impedances=[pos_impedance, pos_impedance, pos_impedance, 50.0, 50.0, 50.0],
+                    block=False
                 )
+
+                # timestamp = rospy.Time.now().to_time() - self.init_time
+
+                # traj_gen_msg = PosePositionSensorMessage(
+                #     id=self.id,
+                #     timestamp=timestamp,
+                #     position=target_transform.translation,
+                #     #TODO: Check if the START_POSE is the same name being maintained
+                #     quaternion=target_transform.quaternion,
+                # )
+                # ros_msg = make_sensor_group_msg(
+                #     trajectory_generator_sensor_msg=sensor_proto2ros_msg(
+                #         traj_gen_msg, SensorDataMessageType.POSE_POSITION
+                #     )
+                # )
+                # self.fa_sensor_pub.publish(ros_msg)
+                # self.id += 1
             
             rospy.loginfo(f"Reached target position")
             
         except Exception as e:
             rospy.logerr(f"Error executing trajectory: {str(e)}")
         
+        self.fa.stop_skill()
         self.executing_trajectory = False
     
     def run(self):
         while not rospy.is_shutdown():
-            if self.new_target_received and not self.executing_trajectory:
+            if self.new_target_received:
                 self.execute_trajectory()
             self.rate.sleep()
     

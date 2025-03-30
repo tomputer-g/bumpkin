@@ -12,7 +12,7 @@ class GenerateDummyTraj(object):
         self.i = 0
         self.dir = 1
         self.target_pub = rospy.Publisher('/target_pos', Point, queue_size=10)
-        self.rate = rospy.Rate(5) # 1hz
+        self.rate = rospy.Rate(2) # 2hz
 
         if len(pts) <= 1:
             rospy.logerr("Need at least 2 points to interpolate traj")
@@ -24,8 +24,8 @@ class GenerateDummyTraj(object):
             else:
                 end = pts[i+1]
 
-            move = np.linspace(pts[i], end, num=15) #1hz * 15s legs
-            wait = np.stack([end] * 25)
+            move = np.linspace(pts[i], end, num=10) # 2hz * 5s legs
+            wait = np.stack([end] * 10) # wait at target for 5s
             leg = np.vstack([move, wait])
             self.traj = np.vstack([self.traj, leg])
 

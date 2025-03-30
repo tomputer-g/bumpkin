@@ -32,11 +32,11 @@ class FrankaTrajectoryExecutor:
         
         self.target_sub = rospy.Subscriber('/target_pos', Point, self.target_callback)
 
-        # self.fa_sensor_pub = rospy.Publisher(FC.DEFAULT_SENSOR_PUBLISHER_TOPIC, SensorDataGroup, queue_size=1000)
+        self.fa_sensor_pub = rospy.Publisher(FC.DEFAULT_SENSOR_PUBLISHER_TOPIC, SensorDataGroup, queue_size=1000)
 
-        # current = self.fa.get_pose()
-        # self.fa.goto_pose(current, duration=5, dynamic=True, buffer_time=10, cartesian_impedances=[600.0, 600.0, 600.0, 50.0, 50.0, 50.0])
-        # self.init_time = rospy.Time.now().to_time()
+        current = self.fa.get_pose()
+        self.fa.goto_pose(current, duration=5, dynamic=True, buffer_time=10, cartesian_impedances=[600.0, 600.0, 600.0, 50.0, 50.0, 50.0])
+        self.init_time = rospy.Time.now().to_time()
         
         # Safety limit distance
         self.max_position_change = 0.10  # 20cm
@@ -159,32 +159,31 @@ class FrankaTrajectoryExecutor:
                     to_frame='world'
                 )
 
-                pos_impedance = max(300.0, min(600.0, 600.0 - distance * 1000))
+                # pos_impedance = max(300.0, min(600.0, 600.0 - distance * 1000))
                 
-                self.fa.goto_pose(
-                    target_transform,
-                    duration=float(duration),
-                    use_impedance=True,
-                    cartesian_impedances=[pos_impedance, pos_impedance, pos_impedance, 50.0, 50.0, 50.0],
-                    block=False
+                # self.fa.goto_pose(
+                #     target_transform,
+                #     duration=float(duration),
+                #     use_impedance=True,
+                #     cartesian_impedances=[pos_impedance, pos_impedance, pos_impedance, 50.0, 50.0, 50.0],
+                # )
+
+                timestamp = rospy.Time.now().to_time() - self.init_time
+
+                traj_gen_msg = PosePositionSensorMessage(
+                    id=self.id,
+                    timestamp=timestamp,
+                    position=target_transform.translation,
+                    #TODO: Check if the START_POSE is the same name being maintained
+                    quaternion=target_transform.quaternion,
                 )
-
-                # timestamp = rospy.Time.now().to_time() - self.init_time
-
-                # traj_gen_msg = PosePositionSensorMessage(
-                #     id=self.id,
-                #     timestamp=timestamp,
-                #     position=target_transform.translation,
-                #     #TODO: Check if the START_POSE is the same name being maintained
-                #     quaternion=target_transform.quaternion,
-                # )
-                # ros_msg = make_sensor_group_msg(
-                #     trajectory_generator_sensor_msg=sensor_proto2ros_msg(
-                #         traj_gen_msg, SensorDataMessageType.POSE_POSITION
-                #     )
-                # )
-                # self.fa_sensor_pub.publish(ros_msg)
-                # self.id += 1
+                ros_msg = make_sensor_group_msg(
+                    trajectory_generator_sensor_msg=sensor_proto2ros_msg(
+                        traj_gen_msg, SensorDataMessageType.POSE_POSITION
+                    )
+                )
+                self.fa_sensor_pub.publish(ros_msg)
+                self.id += 1
             
             rospy.loginfo(f"Reached target position")
             

@@ -25,7 +25,7 @@ if [ $? != 0 ]; then
     # Create a new window for control-pc
     tmux new-window -t $SESSION:3 -n 'control-pc'
     tmux send-keys -t $SESSION:3 'cd /home/student/Documents/frankapy' C-m
-    tmux send-keys -t $SESSION:3 'bash ./bash_scripts/start_control_pc.sh -u student -i iam-bashful' C-m
+    tmux send-keys -t $SESSION:3 'bash ./bash_scripts/start_control_pc.sh -u student -i iam-bashful -g 0' C-m
 
     # Create a new window for running docker-terminal
     tmux new-window -t $SESSION:4 -n 'run docker-terminal'

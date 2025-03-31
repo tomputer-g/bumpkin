@@ -13,7 +13,7 @@ class FrankaTrajectoryExecutor:
         
         # Initialize
         rospy.loginfo("Initializing FrankaArm...")
-        self.fa = FrankaArm(init_node=False)
+        self.fa = FrankaArm(init_node=False, with_gripper=False)
 
         self.current_target = None
         self.new_target_received = False

@@ -101,7 +101,7 @@ class MoveItPlanner():
         waypoints.append(copy.deepcopy(pose_goal))
 
         (plan, fraction) = self.group.compute_cartesian_path(
-            waypoints, 0.01, 0.0  # waypoints to follow  # eef_step
+            waypoints, 0.01, 0  # waypoints to follow  # eef_step
         )  # jump_threshold
 
         joint_values = []

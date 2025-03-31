@@ -3,12 +3,14 @@
 import rospy
 import cv2
 from cv_bridge import CvBridge
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CameraInfo
 import message_filters
 import threading
-import cv2
 import numpy as np
 
+import tf2_ros
+import tf_conversions
+from geometry_msgs.msg import Point, Pose, TransformStamped
 import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
@@ -67,28 +69,70 @@ def display_thread(viewer):
             cv2.waitKey(1)
         rospy.sleep(1./15)
 
+
+def publish_point_tf(x, y, z):
+    br = tf2_ros.StaticTransformBroadcaster()
+    t = TransformStamped()
+    
+    t.header.stamp = rospy.Time.now()
+    t.header.frame_id = "world"
+    t.child_frame_id = "target_point"
+    
+    t.transform.translation.x = x
+    t.transform.translation.y = y
+    t.transform.translation.z = z
+    
+    # No rotation (identity quaternion)
+    t.transform.rotation.w = 1.0
+    
+    br.sendTransform(t)
+    rospy.spin()
+
 class BumpkinPerception:
     def __init__(self):
-        self.bridge = CvBridge()
-        self.depth_sub = message_filters.Subscriber('/camera/depth/image_rect_raw', Image)
-        self.color_sub = message_filters.Subscriber('/camera/color/image_raw', Image)
-        self.ts = message_filters.ApproximateTimeSynchronizer([self.depth_sub, self.color_sub], queue_size=8, slop=0.01)
-        self.ts.registerCallback(self.callback)
+
         self.combined_img = None
         self.centroid_markers = []
         self.centroid_depths = []
 
+        camera_info = rospy.wait_for_message('/camera/depth/camera_info', CameraInfo)
+        self.intrinsic = np.array(camera_info.K).reshape((3, 3))
         self.model = MediapipeWrapper()
 
         display_thread_instance = threading.Thread(target=display_thread, args=(self,))
         display_thread_instance.start()
 
+        self.bridge = CvBridge()
+        self.depth_sub = message_filters.Subscriber('/camera/depth/image_rect_raw', Image)
+        self.color_sub = message_filters.Subscriber('/camera/color/image_raw', Image)
+        self.ts = message_filters.ApproximateTimeSynchronizer([self.depth_sub, self.color_sub], queue_size=8, slop=0.01)
+        self.ts.registerCallback(self.callback)
+        # Get camera transform
+        tfBuffer = tf2_ros.Buffer() #TODO do this in callback
+        tf2_ros.TransformListener(tfBuffer)
+        trans = tfBuffer.lookup_transform("panda_link0", "camera_depth_optical_frame", rospy.Time(), rospy.Duration.from_sec(0.5)).transform
+        pose = Pose(position=Point(x=trans.translation.x, y=trans.translation.y, z=trans.translation.z), orientation=trans.rotation)
+        self.cam_to_world = tf_conversions.toMatrix(tf_conversions.fromMsg(pose))
+        # print("Cam to World", self.cam_to_world)
+
+
+    def _deproject_pixel_to_point_mm(self, x_cam, y_cam, depth):
+        cam_frame_xy = np.array([x_cam, y_cam, 1])
+        K_inv = np.linalg.inv(self.intrinsic)
+
+        norm = K_inv @ cam_frame_xy
+
+        x_mm = norm[0] * depth#y / 1000 - 0.032
+        y_mm = norm[1] * depth
+        z_mm = depth
+
+        return (x_mm, y_mm, z_mm)
 
     def callback(self, depth_msg, color_msg):
-        rospy.loginfo("-----------------Callback loop-----------------")
+        # rospy.loginfo("-----------------Callback loop-----------------")
         try:
             self.depth_image = self.bridge.imgmsg_to_cv2(depth_msg, desired_encoding='passthrough')
-            print(self.depth_image.shape) #480,848 but 848 is width
+            # print(self.depth_image.shape) #480,848 but 848 is width
             color_image = self.bridge.imgmsg_to_cv2(color_msg, desired_encoding='bgr8')
             self.color_image = cv2.cvtColor(color_image, cv2.COLOR_BGR2RGB)
             depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(self.depth_image, alpha=0.03), cv2.COLORMAP_JET)
@@ -104,10 +148,17 @@ class BumpkinPerception:
             self.centroid_depths.clear()
             for centroid in centroids:
                 x, y = int(centroid[0] * self.depth_image.shape[1])-1, int(centroid[1] * self.depth_image.shape[0])-1
-                print("Centroid: ({},{})".format(centroid[0], centroid[1]))
-                print("Hand centroid at: ({}, {})".format(x, y))
+                # print("Centroid: ({},{})".format(centroid[0], centroid[1]))
+                # print("Hand centroid at: ({}, {})".format(x, y))
                 depth_value = self.depth_image[y, x] #test this
-                print("Depth at centroid: {}".format(depth_value))
+                # print("Depth at centroid: {}".format(depth_value))
+                x_cam_mm, y_cam_mm, z_cam_mm = self._deproject_pixel_to_point_mm(x_cam=x, y_cam=y, depth=depth_value)
+                print("Pose in camera frame: ({:.3f}mm, {:.3f}mm, {:.3f}mm)".format(x_cam_mm, y_cam_mm, z_cam_mm))
+
+                x_world_m, y_world_m, z_world_m, _ = np.matmul(self.cam_to_world, np.array([x_cam_mm / 1000, y_cam_mm / 1000 , z_cam_mm / 1000, 1]))
+                print("Pose in world frame: ({:.3f}m, {:.3f}m, {:.3f}m)".format(x_world_m, y_world_m, z_world_m))
+
+                # publish_point_tf(x_world_m, y_world_m, z_world_m)
 
                 self.centroid_markers.append([int(color_image_resized.shape[1] * centroid[0]), int(color_image_resized.shape[0] * centroid[1])])
                 self.centroid_depths.append(depth_value)

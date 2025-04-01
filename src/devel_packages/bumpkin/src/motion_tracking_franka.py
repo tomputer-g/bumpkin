@@ -15,15 +15,31 @@ class FrankaTrajectoryExecutor:
         rospy.loginfo("Initializing FrankaArm...")
         self.fa = FrankaArm(init_node=False, with_gripper=False)
 
+        # Go to home pose 
+        rospy.loginfo("Going to fist bump pose...")
+
+        # EE orientation
+        self.default_orientation = np.array([[4.80390274e-01, -4.80102472e-01,  7.33980109e-01],
+                                        [-7.06876315e-01, -7.07337172e-01, -2.42752946e-05],
+                                        [5.19183069e-01, -5.18821493e-01, -6.79170964e-01]])
+
+        transform = RigidTransform(
+                rotation=self.default_orientation,
+                translation=self.fa.get_pose().translation,
+                from_frame='franka_tool',
+                to_frame='world'
+            )
+
+        self.fa.goto_pose(
+            transform,
+            use_impedance=True,
+            cartesian_impedances=[600.0, 600.0, 600.0, 50.0, 50.0, 50.0]
+        )
+
         self.current_target = None
         self.new_target_received = False
         self.executing_trajectory = False
         self.current_pose = self.fa.get_pose()
-
-        # EE orientation
-        self.default_orientation = np.array([[0.42156439, -0.011119, 0.90672841],
-                                    [-0.01462131,-0.99986855,-0.00546339],
-                                    [ 0.90666997,-0.01095438,-0.42167967]])
         
         self.target_sub = rospy.Subscriber('/target_pos', Point, self.target_callback)
         
@@ -158,8 +174,10 @@ class FrankaTrajectoryExecutor:
 
 if __name__ == '__main__':
     try:
+        rospy.init_node('motion_track', anonymous=False)
         executor = FrankaTrajectoryExecutor()
         rospy.on_shutdown(executor.shutdown)
+        
         executor.run()
     except rospy.ROSInterruptException:
         rospy.loginfo("ROS interrupt received, shutting down")

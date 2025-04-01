@@ -7,6 +7,7 @@ from sensor_msgs.msg import Image, CameraInfo
 import message_filters
 import threading
 import numpy as np
+from motion_tracking_franka import FrankaTrajectoryExecutor
 
 import tf2_ros
 import tf_conversions
@@ -157,6 +158,8 @@ class BumpkinPerception:
                 # print("Centroid: ({},{})".format(centroid[0], centroid[1]))
                 # print("Hand centroid at: ({}, {})".format(x, y))
                 depth_value = self.depth_image[y, x] #test this
+                if depth_value == 0:
+                    continue
                 # print("Depth at centroid: {}".format(depth_value))
                 x_cam_mm, y_cam_mm, z_cam_mm = self._deproject_pixel_to_point_mm(x_cam=x, y_cam=y, depth=depth_value)
                 print("Pose in camera frame: ({:.3f}mm, {:.3f}mm, {:.3f}mm)".format(x_cam_mm, y_cam_mm, z_cam_mm))
@@ -186,6 +189,15 @@ class BumpkinPerception:
 if __name__ == '__main__':
     rospy.init_node('realsense_viewer', anonymous=True)
     perception = BumpkinPerception()
+
+    # franka_executor = FrankaTrajectoryExecutor()
+
+    # rospy.on_shutdown(franka_executor.shutdown)
+
+    # thread = threading.Thread(target=franka_executor.run)
+    # thread.daemon = True
+    # thread.start()
+
     try:
         rospy.spin()
     except KeyboardInterrupt:

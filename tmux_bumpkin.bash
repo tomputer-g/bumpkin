@@ -38,8 +38,8 @@ if [ $? != 0 ]; then
     # Create a new window for joining docker-terminal
     tmux new-window -t $SESSION:5 -n 'join docker-terminal'
     tmux send-keys -t $SESSION:5 'cd /home/student/ws_bumpkin/bumpkin' C-m
-    tmux send-keys -t $SESSION:5 'bash ./terminal_docker.sh && pip install mediapipe && cp src/devel_packages/bumpkin/src/hand_landmarker.task /root/.ros
-' C-m
+    tmux send-keys -t $SESSION:5 'bash ./terminal_docker.sh' C-m
+    tmux send-keys -t $SESSION:5 'pip install mediapipe && cp src/devel_packages/bumpkin/src/hand_landmarker.task /root/.ros' C-m
 fi
 
 # Attach to the session

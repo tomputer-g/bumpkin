@@ -16,6 +16,7 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 import os
 
+CHANNEL = "/target_pos"
 class AbstractPerceptionModel:
     def __init__(self):
         pass
@@ -25,7 +26,7 @@ class AbstractPerceptionModel:
 
 # Uses Google's MediaPipe Hand Landmarker model to detect hand landmarks
 class MediapipeWrapper(AbstractPerceptionModel):
-    def __init__(self, NUM_MAX_HANDS = 2):
+    def __init__(self, NUM_MAX_HANDS = 1):
         if not os.path.exists('hand_landmarker.task'):
             print("The model file 'hand_landmarker.task' does not exist. Attempting to fetch...")
             os.system('wget -q https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task')
@@ -55,20 +56,21 @@ class MediapipeWrapper(AbstractPerceptionModel):
             det_centroids.append(self._get_hand_centroid(det_results))
         return det_centroids
 
-def display_thread(viewer):
+def display_thread(perceptionThread):
     while not rospy.is_shutdown():
-        if viewer.combined_img is not None:
-            view = viewer.combined_img.copy()
-            # print(view.dtype)
-            
-            # for idx in range(len(viewer.centroid_markers)):
-            #     x, y = viewer.centroid_markers[idx][0], viewer.centroid_markers[idx][1]
-            #     cv2.circle(view, (x, y), 5, (0, 255, 0), 2)
-            #     cv2.putText(viewer.combined_img, f'Depth: {viewer.centroid_depths[idx]}', (x + 10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
+        if perceptionThread.combined_img is not None:
+            view = perceptionThread.combined_img.copy()
             cv2.imshow('Combined Image', view)
             cv2.waitKey(1)
         rospy.sleep(1./15)
 
+def target_publisher(perceptionThread, topic=CHANNEL, rate=1):
+    target_pub = rospy.Publisher(topic, Point, queue_size=10)
+    target_pub_rate = rospy.Rate(rate)
+    while not rospy.is_shutdown():
+        if perceptionThread.target is not None:
+            target_pub.publish(perceptionThread.target)
+        target_pub_rate.sleep()
 
 def publish_point_tf(x, y, z):
     br = tf2_ros.StaticTransformBroadcaster()
@@ -98,9 +100,13 @@ class BumpkinPerception:
         camera_info = rospy.wait_for_message('/camera/depth/camera_info', CameraInfo)
         self.intrinsic = np.array(camera_info.K).reshape((3, 3))
         self.model = MediapipeWrapper()
+        self.target = None
 
         display_thread_instance = threading.Thread(target=display_thread, args=(self,))
         display_thread_instance.start()
+
+        target_pub_thread_instance = threading.Thread(target=target_publisher, args=(self,))
+        target_pub_thread_instance.start()
 
         self.bridge = CvBridge()
         self.depth_sub = message_filters.Subscriber('/camera/depth/image_rect_raw', Image)
@@ -157,7 +163,11 @@ class BumpkinPerception:
 
                 x_world_m, y_world_m, z_world_m, _ = np.matmul(self.cam_to_world, np.array([x_cam_mm / 1000, y_cam_mm / 1000 , z_cam_mm / 1000, 1]))
                 print("Pose in world frame: ({:.3f}m, {:.3f}m, {:.3f}m)".format(x_world_m, y_world_m, z_world_m))
-
+                self.target = Point()
+                            
+                self.target.x = x_world_m
+                self.target.y = y_world_m
+                self.target.z = z_world_m
                 # publish_point_tf(x_world_m, y_world_m, z_world_m)
 
                 self.centroid_markers.append([int(color_image_resized.shape[1] * centroid[0]), int(color_image_resized.shape[0] * centroid[1])])
@@ -168,6 +178,7 @@ class BumpkinPerception:
                 x, y = self.centroid_markers[idx][0], self.centroid_markers[idx][1]
                 cv2.circle(self.combined_img, (x, y), 5, (0, 255, 0), 2)
                 cv2.putText(self.combined_img, f'Depth: {self.centroid_depths[idx]}', (x + 10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
+            
             
         except Exception as e:
             rospy.logerr(e)

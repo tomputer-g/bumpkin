@@ -114,14 +114,14 @@ class BumpkinPerception:
         self.bridge = CvBridge()
         self.depth_sub = message_filters.Subscriber('/camera/depth/image_rect_raw', Image)
         self.color_sub = message_filters.Subscriber('/camera/color/image_raw', Image)
-        self.ts = message_filters.ApproximateTimeSynchronizer([self.depth_sub, self.color_sub], queue_size=8, slop=0.01)
+        self.ts = message_filters.ApproximateTimeSynchronizer([self.depth_sub, self.color_sub], queue_size=15, slop=0.01)
         self.ts.registerCallback(self.callback)
         # Get camera transform
         self.tfBuffer = tf2_ros.Buffer()
         tf2_ros.TransformListener(self.tfBuffer)
         
         # print("Cam to World", self.cam_to_world)
-        self.tracker = Tracker(distance_function='euclidean', distance_threshold=0.5, detection_threshold=0.5)
+        self.tracker = Tracker(distance_function='euclidean', distance_threshold=40, hit_counter_max=10)
 
     def _get_cam_transform(self):
         trans = self.tfBuffer.lookup_transform("panda_link0", "camera_depth_optical_frame", rospy.Time(), rospy.Duration.from_sec(0.5)).transform
@@ -187,7 +187,7 @@ class BumpkinPerception:
                 self.centroid_depths.append(depth_value)
 
                 # Create a Norfair detection
-                norfair_detection = Detection(points=np.array([[x, y]]), scores=np.array([depth_value]), data={'depth': depth_value})
+                norfair_detection = Detection(points=np.array([[int(color_image_resized.shape[1] * centroid[0]), int(color_image_resized.shape[0] * centroid[1])]]))
                 norfair_detections.append(norfair_detection)
             # Update the tracker with the detections
             self.tracker.update(detections=norfair_detections)
@@ -195,8 +195,9 @@ class BumpkinPerception:
             for tracked_object in self.tracker.tracked_objects:
                 for point in tracked_object.estimate:
                     x, y = int(point[0]), int(point[1])
+                    print(tracked_object)
                     cv2.circle(self.combined_img, (x, y), 5, (255, 0, 0), 2)
-                    cv2.putText(self.combined_img, f'Depth: {tracked_object.data["depth"]}', (x + 10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.LINE_AA)
+                    # cv2.putText(self.combined_img, f'Depth: {tracked_object.data["depth"]}', (x + 10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.LINE_AA)
       
             # for idx in range(len(self.centroid_markers)):
             #     x, y = self.centroid_markers[idx][0], self.centroid_markers[idx][1]

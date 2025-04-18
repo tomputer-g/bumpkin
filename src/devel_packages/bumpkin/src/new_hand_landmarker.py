@@ -18,6 +18,7 @@ from mediapipe.tasks.python import vision
 import os
 
 from norfair import Detection, Tracker
+import time
 
 CHANNEL = "/target_pos"
 MAX_DIST_FROM_CAMERA = 0.6 #meters, beyond this distance from camera detections are ignored
@@ -52,14 +53,29 @@ class MediapipeWrapper(AbstractPerceptionModel):
         x_avg = min(1, max(0, x_avg))
         y_avg = min(1, max(0, y_avg))
         return (x_avg, y_avg)
+    
+    def _get_hand_bbox(self, hand_landmarks):
+        x_min = min([landmark.x for landmark in hand_landmarks])
+        x_max = max([landmark.x for landmark in hand_landmarks])
+        y_min = min([landmark.y for landmark in hand_landmarks])
+        y_max = max([landmark.y for landmark in hand_landmarks])
+        # Prevent OOB predictions, which mediapipe does
+        x_min = min(1, max(0, x_min))
+        x_max = min(1, max(0, x_max))
+        y_min = min(1, max(0, y_min))
+        y_max = min(1, max(0, y_max))
+        return (x_min, y_min, x_max, y_max)
 
     # Predicts centroids (by percentage of width/height) of hands in the frame
     def predict(self, frame):
         det_results_list = self.detector.detect(frame)
         det_centroids = []
+        det_bboxes = []
         for i, det_results in enumerate(det_results_list.hand_landmarks):
             det_centroids.append(self._get_hand_centroid(det_results))
-        return det_centroids
+            det_bboxes.append(self._get_hand_bbox(det_results))
+
+        return det_centroids, det_bboxes
 
 def display_thread(perceptionThread):
     while not rospy.is_shutdown():
@@ -156,15 +172,17 @@ class BumpkinPerception:
             self.combined_img = combined_image
 
             _frame = mp.Image(image_format=mp.ImageFormat.SRGB, data=self.color_image)
-            
-            centroids = self.model.predict(_frame)
+            centroids, bboxes = self.model.predict(_frame)
             self.centroid_markers.clear()
             self.centroid_depths.clear()
 
             cam_to_world = self._get_cam_transform()
 
             norfair_detections = []
-            for centroid in centroids:
+            for centroid_idx in range(len(centroids)):
+                centroid = centroids[centroid_idx]
+                bbox = bboxes[centroid_idx]
+                cv2.rectangle(self.combined_img, (int(bbox[0] * color_image_resized.shape[1]), int(bbox[1] * color_image_resized.shape[0])), (int(bbox[2] * color_image_resized.shape[1]), int(bbox[3] * color_image_resized.shape[0])), (0, 255, 0), 2)
                 x, y = int(centroid[0] * self.depth_image.shape[1])-1, int(centroid[1] * self.depth_image.shape[0])-1
                 depth_value = self.depth_image[y, x]
 
@@ -190,7 +208,7 @@ class BumpkinPerception:
                 self.centroid_depths.append(depth_value)
 
                 if z_cam_mm / 1000.0 > MAX_DIST_FROM_CAMERA:
-                    print("Ignoring object at {:.3f}mm depth beyond max distance from camera")
+                    print("Ignoring object at {:.3f}mm depth beyond max distance from camera".format(z_cam_mm))
                     continue
 
                 # Create a Norfair detection

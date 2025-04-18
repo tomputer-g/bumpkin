@@ -70,7 +70,7 @@ def transform_backward_realsense(panda_to_camrgb_pose):
 def static_tf_broadcaster_realsense(static_tf_params: Pose):
     static_transformStamped = geometry_msgs.msg.TransformStamped()
     static_transformStamped.header.stamp = rospy.Time.now()
-    static_transformStamped.header.frame_id = "/panda_end_effector"
+    static_transformStamped.header.frame_id = "/panda_link8" #/panda_end_effector
     static_transformStamped.child_frame_id =  "/camera_link"
     static_transformStamped.transform.translation.x = static_tf_params.position.x
     static_transformStamped.transform.translation.y = static_tf_params.position.y

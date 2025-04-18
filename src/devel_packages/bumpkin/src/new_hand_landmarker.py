@@ -20,6 +20,8 @@ import os
 from norfair import Detection, Tracker
 
 CHANNEL = "/target_pos"
+MAX_DIST_FROM_CAMERA = 0.6 #meters, beyond this distance from camera detections are ignored
+
 class AbstractPerceptionModel:
     def __init__(self):
         pass
@@ -164,15 +166,16 @@ class BumpkinPerception:
             norfair_detections = []
             for centroid in centroids:
                 x, y = int(centroid[0] * self.depth_image.shape[1])-1, int(centroid[1] * self.depth_image.shape[0])-1
-                # print("Centroid: ({},{})".format(centroid[0], centroid[1]))
-                # print("Hand centroid at: ({}, {})".format(x, y))
-                depth_value = self.depth_image[y, x] #test this
+                depth_value = self.depth_image[y, x]
+
                 if depth_value == 0:
+                    print("Ignoring object at ({}, {}) with depth 0".format(x, y))
                     continue
                 # print("Depth at centroid: {}".format(depth_value))
                 x_cam_mm, y_cam_mm, z_cam_mm = self._deproject_pixel_to_point_mm(x_cam=x, y_cam=y, depth=depth_value)
-                print("Pose in camera frame: ({:.3f}mm, {:.3f}mm, {:.3f}mm)".format(x_cam_mm, y_cam_mm, z_cam_mm))
+                # print("Pose in camera frame: ({:.3f}mm, {:.3f}mm, {:.3f}mm)".format(x_cam_mm, y_cam_mm, z_cam_mm))
 
+                
 
                 x_world_m, y_world_m, z_world_m, _ = np.matmul(cam_to_world, np.array([x_cam_mm / 1000, y_cam_mm / 1000 , z_cam_mm / 1000, 1]))
                 print("Pose in world frame: ({:.3f}m, {:.3f}m, {:.3f}m)".format(x_world_m, y_world_m, z_world_m))
@@ -185,6 +188,10 @@ class BumpkinPerception:
 
                 self.centroid_markers.append([int(color_image_resized.shape[1] * centroid[0]), int(color_image_resized.shape[0] * centroid[1])])
                 self.centroid_depths.append(depth_value)
+
+                if z_cam_mm / 1000.0 > MAX_DIST_FROM_CAMERA:
+                    print("Ignoring object at {:.3f}mm depth beyond max distance from camera")
+                    continue
 
                 # Create a Norfair detection
                 norfair_detection = Detection(points=np.array([[int(color_image_resized.shape[1] * centroid[0]), int(color_image_resized.shape[0] * centroid[1])]]))

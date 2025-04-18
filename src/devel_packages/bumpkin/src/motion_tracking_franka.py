@@ -5,18 +5,19 @@ import numpy as np
 from frankapy import FrankaArm
 from autolab_core import RigidTransform
 from scipy.spatial.transform import Rotation
+import threading
+from collections import deque
 
 class FrankaTrajectoryExecutor:
     def __init__(self):
-
-        self.rate = rospy.Rate(1000)  # 1000Hz control loop
+        self.rate = rospy.Rate(10)  # Increase control loop frequency to 10Hz
         
         # Initialize
         rospy.loginfo("Initializing FrankaArm...")
         self.fa = FrankaArm(init_node=False, with_gripper=False)
 
         # Go to home pose 
-        rospy.loginfo("Going to fist bump pose...")
+        rospy.loginfo("Going to initial pose...")
 
         # EE orientation
         self.default_orientation = np.array([[4.80390274e-01, -4.80102472e-01,  7.33980109e-01],
@@ -36,37 +37,33 @@ class FrankaTrajectoryExecutor:
             cartesian_impedances=[600.0, 600.0, 600.0, 50.0, 50.0, 50.0]
         )
 
-        self.current_target = None
-        self.new_target_received = False
-        self.executing_trajectory = False
-        self.current_pose = self.fa.get_pose()
+        # Use a deque to store waypoints
+        self.waypoint_queue = deque(maxlen=100)
+        self.waypoint_lock = threading.Lock()
         
+        # State tracking
+        self.current_target = None
+        self.is_moving = False
+        self.motion_thread = None
+        
+        # Subscribe to target position topic
         self.target_sub = rospy.Subscriber('/target_pos', Point, self.target_callback)
         
         # Safety limit distance
-        self.max_position_change = 0.10  # 40cm
+        self.max_position_change = 0.10  # 10cm
+        self.min_waypoint_distance = 0.01  # 1cm
+        self.last_published_target = None
         
         rospy.loginfo("Franka ready.")      
     
     def target_callback(self, msg):
         # Callback for receiving new target positions
- 
-        if self.executing_trajectory:
-            rospy.logwarn("Received new target while executing trajectory, skip")
-            return
-        
         target_position = np.array([msg.x, msg.y, msg.z])
         
-        if self.current_target is not None:
-
-            distance = np.linalg.norm(target_position - self.current_target)
-            
-            # If the target hasn't changed significantly, ignore
-            if distance < 0.01:  # 1cm threshold
-                return
-        
-        # Safety check - limit maximum position change
+        # Get current position
         current_position = self.fa.get_pose().translation
+        
+        # Safety check - limit maximum position change from current position
         distance_to_target = np.linalg.norm(target_position - current_position)
         
         if distance_to_target > self.max_position_change:
@@ -74,93 +71,96 @@ class FrankaTrajectoryExecutor:
             direction = (target_position - current_position) / distance_to_target
             target_position = current_position + direction * self.max_position_change
         
-        self.current_target = target_position
-        self.new_target_received = True
+        # If we have a previous target, check if this one is significantly different
+        if self.last_published_target is not None:
+            distance_from_last = np.linalg.norm(target_position - self.last_published_target)
+            
+            # If the target hasn't changed significantly, ignore
+            if distance_from_last < self.min_waypoint_distance:  # 1cm threshold
+                return
+        
+        # Update last published target
+        self.last_published_target = target_position
+        
+        # Add waypoint to queue with thread safety
+        with self.waypoint_lock:
+            self.waypoint_queue.append(target_position)
+            
         rospy.loginfo(f"New target received: [{target_position[0]:.4f}, {target_position[1]:.4f}, {target_position[2]:.4f}]")
+        
+        # Start motion thread if not already running
+        if not self.is_moving:
+            self.start_motion_thread()
     
-    def execute_trajectory(self):
-        if not self.new_target_received:
+    def start_motion_thread(self):
+        if self.is_moving:
             return
-        
-        self.executing_trajectory = True
-        self.new_target_received = False
-        
+            
+        self.is_moving = True
+        self.motion_thread = threading.Thread(target=self.continuous_motion_loop)
+        self.motion_thread.daemon = True
+        self.motion_thread.start()
+    
+    def continuous_motion_loop(self):
+        """Main motion loop that continuously processes waypoints"""
         try:
-            current_position = self.fa.get_pose().translation
-            target_position = self.current_target
-            
-            distance = np.linalg.norm(target_position - current_position)
-            
-            base_duration = 1.5  # minimum duration in seconds
-            distance_factor = 2.0  # seconds per meter of travel
-            duration = base_duration + distance * distance_factor
-            
-            duration = min(duration, 4.0)
-            
-            rospy.loginfo(f"Moving to target: {self.current_target} (distance: {distance:.3f}m, duration: {duration:.2f}s)")
-            
-            # For longer movements, use intermediate waypoints
-            if distance > 0.15: 
-                rospy.loginfo("Using intermediate waypoints for smoother motion")
+            while not rospy.is_shutdown():
+                # Check if we have waypoints to process
+                if len(self.waypoint_queue) == 0:
+                    rospy.loginfo("No more waypoints, stopping continuous motion")
+                    self.is_moving = False
+                    return
                 
-                num_waypoints = max(2, int(distance * 10))  # More waypoints for longer distances
+                # Get current position and next waypoint
+                current_position = self.fa.get_pose().translation
                 
-                # Use cubic interpolation for position (smoother acceleration/deceleration)
-                t_values = np.linspace(0, 1, num_waypoints)
+                # Thread-safe access to waypoint queue
+                with self.waypoint_lock:
+                    next_waypoint = self.waypoint_queue.popleft()
                 
-                # Apply cubic ease-in/ease-out function
-                # This creates a smoother acceleration and deceleration profile
-                t_smooth = t_values**2 * (3 - 2 * t_values)
+                distance = np.linalg.norm(next_waypoint - current_position)
                 
-                # Interpolate positions
-                waypoints = []
-                for t in t_smooth:
-                    pos = current_position + t * (target_position - current_position)
-                    transform = RigidTransform(
-                        rotation=self.default_orientation,
-                        translation=pos,
-                        from_frame='franka_tool',
-                        to_frame='world'
-                    )
-                    waypoints.append((transform, duration / num_waypoints))
-
-                for i, (waypoint, waypoint_duration) in enumerate(waypoints):
-                    rospy.loginfo(f"Executing waypoint {i+1}/{len(waypoints)}")
-                    self.fa.goto_pose(
-                        waypoint,
-                        duration=float(waypoint_duration),
-                        use_impedance=True,
-                        cartesian_impedances=[600.0, 600.0, 600.0, 50.0, 50.0, 50.0]
-                    )
-            else:
-                # For shorter movements, just go to pose
+                # Calculate appropriate duration and impedance based on distance
+                base_duration = 0.3  # reduced minimum duration for more responsiveness
+                distance_factor = 1.5  # seconds per meter of travel
+                duration = base_duration + distance * distance_factor
+                duration = min(duration, 2.0)  # cap at 2 seconds max
+                
+                # Adjust impedance for smoother motion at different speeds
+                pos_impedance = max(300.0, min(600.0, 600.0 - distance * 1000))
+                
+                # Create transform for the waypoint
                 target_transform = RigidTransform(
                     rotation=self.default_orientation,
-                    translation=target_position,
+                    translation=next_waypoint,
                     from_frame='franka_tool',
                     to_frame='world'
                 )
-
-                pos_impedance = max(300.0, min(600.0, 600.0 - distance * 1000))
                 
+                rospy.loginfo(f"Moving to waypoint: {next_waypoint} (distance: {distance:.3f}m, duration: {duration:.2f}s)")
+                
+                # Execute motion to waypoint
                 self.fa.goto_pose(
                     target_transform,
                     duration=float(duration),
                     use_impedance=True,
                     cartesian_impedances=[pos_impedance, pos_impedance, pos_impedance, 50.0, 50.0, 50.0]
                 )
-            
-            rospy.loginfo(f"Reached target position")
-            
+                
+                # Check if we received any new waypoints during execution
+                # If not, we'll exit the loop on the next iteration
+                if len(self.waypoint_queue) == 0:
+                    self.rate.sleep()  # Give a small delay before exiting
+                
         except Exception as e:
-            rospy.logerr(f"Error executing trajectory: {str(e)}")
+            rospy.logerr(f"Error in continuous motion loop: {str(e)}")
         
-        self.executing_trajectory = False
+        self.is_moving = False
     
     def run(self):
         while not rospy.is_shutdown():
-            if self.new_target_received and not self.executing_trajectory:
-                self.execute_trajectory()
+            # Main control loop now just monitors and handles any errors
+            # The actual motion happens in the continuous_motion_loop thread
             self.rate.sleep()
     
     def shutdown(self):

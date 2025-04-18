@@ -22,6 +22,7 @@ import time
 
 CHANNEL = "/target_pos"
 MAX_DIST_FROM_CAMERA = 0.6 #meters, beyond this distance from camera detections are ignored
+NUM_MAX_HANDS = 2
 
 class AbstractPerceptionModel:
     def __init__(self):
@@ -32,7 +33,7 @@ class AbstractPerceptionModel:
 
 # Uses Google's MediaPipe Hand Landmarker model to detect hand landmarks
 class MediapipeWrapper(AbstractPerceptionModel):
-    def __init__(self, NUM_MAX_HANDS = 1):
+    def __init__(self):
         if not os.path.exists('hand_landmarker.task'):
             print("The model file 'hand_landmarker.task' does not exist. Attempting to fetch...")
             os.system('wget -q https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task')
@@ -77,13 +78,13 @@ class MediapipeWrapper(AbstractPerceptionModel):
 
         return det_centroids, det_bboxes
 
+display_img = None
 def display_thread(perceptionThread):
     while not rospy.is_shutdown():
-        if perceptionThread.combined_img is not None:
-            view = perceptionThread.combined_img.copy()
-            cv2.imshow('Combined Image', view)
+        if display_img is not None:
+            cv2.imshow('Combined Image', display_img)
             cv2.waitKey(1)
-        rospy.sleep(1./15)
+        rospy.sleep(1./30)
 
 def target_publisher(perceptionThread, topic=CHANNEL, rate=1):
     target_pub = rospy.Publisher(topic, Point, queue_size=10)
@@ -159,6 +160,7 @@ class BumpkinPerception:
         return (x_mm, y_mm, z_mm)
 
     def callback(self, depth_msg, color_msg):
+        global display_img
         rospy.loginfo("-----------------Callback loop-----------------")
         try:
             self.depth_image = self.bridge.imgmsg_to_cv2(depth_msg, desired_encoding='passthrough')
@@ -173,6 +175,8 @@ class BumpkinPerception:
 
             _frame = mp.Image(image_format=mp.ImageFormat.SRGB, data=self.color_image)
             centroids, bboxes = self.model.predict(_frame)
+            # print("\rCentroids: ", centroids)
+
             self.centroid_markers.clear()
             self.centroid_depths.clear()
 
@@ -182,14 +186,21 @@ class BumpkinPerception:
             for centroid_idx in range(len(centroids)):
                 centroid = centroids[centroid_idx]
                 bbox = bboxes[centroid_idx]
-                cv2.rectangle(self.combined_img, (int(bbox[0] * color_image_resized.shape[1]), int(bbox[1] * color_image_resized.shape[0])), (int(bbox[2] * color_image_resized.shape[1]), int(bbox[3] * color_image_resized.shape[0])), (0, 255, 0), 2)
                 x, y = int(centroid[0] * self.depth_image.shape[1])-1, int(centroid[1] * self.depth_image.shape[0])-1
                 depth_value = self.depth_image[y, x]
 
                 if depth_value == 0:
                     print("Ignoring object at ({}, {}) with depth 0".format(x, y))
+                    cv2.rectangle(self.combined_img, (int(bbox[0] * color_image_resized.shape[1]), int(bbox[1] * color_image_resized.shape[0])), (int(bbox[2] * color_image_resized.shape[1]), int(bbox[3] * color_image_resized.shape[0])), (0, 0, 255), 2)
                     continue
-                # print("Depth at centroid: {}".format(depth_value))
+                elif depth_value / 1000.0 > MAX_DIST_FROM_CAMERA:
+                    print("Ignoring object at ({}, {}) with depth {:.3f}m beyond max distance from camera".format(x, y, depth_value / 1000.0))
+                    cv2.rectangle(self.combined_img, (int(bbox[0] * color_image_resized.shape[1]), int(bbox[1] * color_image_resized.shape[0])), (int(bbox[2] * color_image_resized.shape[1]), int(bbox[3] * color_image_resized.shape[0])), (0, 0, 255), 2)
+                    continue
+
+                cv2.rectangle(self.combined_img, (int(bbox[0] * color_image_resized.shape[1]), int(bbox[1] * color_image_resized.shape[0])), (int(bbox[2] * color_image_resized.shape[1]), int(bbox[3] * color_image_resized.shape[0])), (0, 255, 0), 2)
+
+                print("Depth at centroid: {}".format(depth_value))
                 x_cam_mm, y_cam_mm, z_cam_mm = self._deproject_pixel_to_point_mm(x_cam=x, y_cam=y, depth=depth_value)
                 # print("Pose in camera frame: ({:.3f}mm, {:.3f}mm, {:.3f}mm)".format(x_cam_mm, y_cam_mm, z_cam_mm))
 
@@ -207,10 +218,6 @@ class BumpkinPerception:
                 self.centroid_markers.append([int(color_image_resized.shape[1] * centroid[0]), int(color_image_resized.shape[0] * centroid[1])])
                 self.centroid_depths.append(depth_value)
 
-                if z_cam_mm / 1000.0 > MAX_DIST_FROM_CAMERA:
-                    print("Ignoring object at {:.3f}mm depth beyond max distance from camera".format(z_cam_mm))
-                    continue
-
                 # Create a Norfair detection
                 norfair_detection = Detection(points=np.array([[int(color_image_resized.shape[1] * centroid[0]), int(color_image_resized.shape[0] * centroid[1])]]))
                 norfair_detections.append(norfair_detection)
@@ -220,14 +227,12 @@ class BumpkinPerception:
             for tracked_object in self.tracker.tracked_objects:
                 for point in tracked_object.estimate:
                     x, y = int(point[0]), int(point[1])
-                    print(tracked_object)
                     cv2.circle(self.combined_img, (x, y), 5, (255, 0, 0), 2)
-                    # cv2.putText(self.combined_img, f'Depth: {tracked_object.data["depth"]}', (x + 10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1, cv2.LINE_AA)
-      
-            # for idx in range(len(self.centroid_markers)):
-            #     x, y = self.centroid_markers[idx][0], self.centroid_markers[idx][1]
-            #     cv2.circle(self.combined_img, (x, y), 5, (0, 255, 0), 2)
-            #     cv2.putText(self.combined_img, f'Depth: {self.centroid_depths[idx]}', (x + 10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
+            display_img = self.combined_img.copy()
+            for idx in range(len(self.centroid_markers)):
+                x, y = self.centroid_markers[idx][0], self.centroid_markers[idx][1]
+                cv2.circle(self.combined_img, (x, y), 5, (0, 255, 0), 2)
+                cv2.putText(self.combined_img, f'Depth: {self.centroid_depths[idx]}', (x + 10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
             
             
         except Exception as e:

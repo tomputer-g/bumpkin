@@ -24,15 +24,14 @@ CHANNEL = "/target_pos"
 MAX_DIST_FROM_CAMERA = 0.6 #meters, beyond this distance from camera detections are ignored
 NUM_MAX_HANDS = 2
 
-class AbstractPerceptionModel:
-    def __init__(self):
-        pass
+FPS = 30 #Should be same as realsense.launch definitions. Not to exceed 30 (mediapipe takes max 30ms)
 
-    def predict(self, frame):
-        pass
+### Norfair
+DIST_THRESHOLD_BETWEEN_FRAMES = 120
+HIT_COUNTER_MAX = 10
 
 # Uses Google's MediaPipe Hand Landmarker model to detect hand landmarks
-class MediapipeWrapper(AbstractPerceptionModel):
+class MediapipeWrapper():
     def __init__(self):
         if not os.path.exists('hand_landmarker.task'):
             print("The model file 'hand_landmarker.task' does not exist. Attempting to fetch...")
@@ -84,7 +83,7 @@ def display_thread(perceptionThread):
         if display_img is not None:
             cv2.imshow('Combined Image', display_img)
             cv2.waitKey(1)
-        rospy.sleep(1./30)
+        rospy.sleep(1./FPS)
 
 def target_publisher(perceptionThread, topic=CHANNEL, rate=1):
     target_pub = rospy.Publisher(topic, Point, queue_size=10)
@@ -140,7 +139,7 @@ class BumpkinPerception:
         tf2_ros.TransformListener(self.tfBuffer)
         
         # print("Cam to World", self.cam_to_world)
-        self.tracker = Tracker(distance_function='euclidean', distance_threshold=40, hit_counter_max=10)
+        self.tracker = Tracker(distance_function='euclidean', distance_threshold=DIST_THRESHOLD_BETWEEN_FRAMES, hit_counter_max=HIT_COUNTER_MAX)
 
     def _get_cam_transform(self):
         trans = self.tfBuffer.lookup_transform("panda_link0", "camera_depth_optical_frame", rospy.Time(), rospy.Duration.from_sec(0.5)).transform

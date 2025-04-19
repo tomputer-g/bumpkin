@@ -17,17 +17,22 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 import os
 
-CHANNEL = "/target_pos"
-class AbstractPerceptionModel:
-    def __init__(self):
-        pass
+from norfair import Detection, Tracker
+import time
 
-    def predict(self, frame):
-        pass
+CHANNEL = "/target_pos"
+MAX_DIST_FROM_CAMERA = 0.6 #meters, beyond this distance from camera detections are ignored
+NUM_MAX_HANDS = 2
+
+FPS = 30 #Should be same as realsense.launch definitions. Not to exceed 30 (mediapipe takes max 30ms)
+
+### Norfair
+DIST_THRESHOLD_BETWEEN_FRAMES = 120
+HIT_COUNTER_MAX = 10
 
 # Uses Google's MediaPipe Hand Landmarker model to detect hand landmarks
-class MediapipeWrapper(AbstractPerceptionModel):
-    def __init__(self, NUM_MAX_HANDS = 1):
+class MediapipeWrapper():
+    def __init__(self):
         if not os.path.exists('hand_landmarker.task'):
             print("The model file 'hand_landmarker.task' does not exist. Attempting to fetch...")
             os.system('wget -q https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task')
@@ -48,22 +53,37 @@ class MediapipeWrapper(AbstractPerceptionModel):
         x_avg = min(1, max(0, x_avg))
         y_avg = min(1, max(0, y_avg))
         return (x_avg, y_avg)
+    
+    def _get_hand_bbox(self, hand_landmarks):
+        x_min = min([landmark.x for landmark in hand_landmarks])
+        x_max = max([landmark.x for landmark in hand_landmarks])
+        y_min = min([landmark.y for landmark in hand_landmarks])
+        y_max = max([landmark.y for landmark in hand_landmarks])
+        # Prevent OOB predictions, which mediapipe does
+        x_min = min(1, max(0, x_min))
+        x_max = min(1, max(0, x_max))
+        y_min = min(1, max(0, y_min))
+        y_max = min(1, max(0, y_max))
+        return (x_min, y_min, x_max, y_max)
 
     # Predicts centroids (by percentage of width/height) of hands in the frame
     def predict(self, frame):
         det_results_list = self.detector.detect(frame)
         det_centroids = []
+        det_bboxes = []
         for i, det_results in enumerate(det_results_list.hand_landmarks):
             det_centroids.append(self._get_hand_centroid(det_results))
-        return det_centroids
+            det_bboxes.append(self._get_hand_bbox(det_results))
 
+        return det_centroids, det_bboxes
+
+display_img = None
 def display_thread(perceptionThread):
     while not rospy.is_shutdown():
-        if perceptionThread.combined_img is not None:
-            view = perceptionThread.combined_img.copy()
-            cv2.imshow('Combined Image', view)
+        if display_img is not None:
+            cv2.imshow('Combined Image', display_img)
             cv2.waitKey(1)
-        rospy.sleep(1./15)
+        rospy.sleep(1./FPS)
 
 def target_publisher(perceptionThread, topic=CHANNEL, rate=1):
     target_pub = rospy.Publisher(topic, Point, queue_size=10)
@@ -112,16 +132,19 @@ class BumpkinPerception:
         self.bridge = CvBridge()
         self.depth_sub = message_filters.Subscriber('/camera/depth/image_rect_raw', Image)
         self.color_sub = message_filters.Subscriber('/camera/color/image_raw', Image)
-        self.ts = message_filters.ApproximateTimeSynchronizer([self.depth_sub, self.color_sub], queue_size=8, slop=0.01)
+        self.ts = message_filters.ApproximateTimeSynchronizer([self.depth_sub, self.color_sub], queue_size=15, slop=0.01)
         self.ts.registerCallback(self.callback)
         # Get camera transform
-        tfBuffer = tf2_ros.Buffer() #TODO do this in callback
-        tf2_ros.TransformListener(tfBuffer)
-        trans = tfBuffer.lookup_transform("panda_link0", "camera_depth_optical_frame", rospy.Time(), rospy.Duration.from_sec(0.5)).transform
-        pose = Pose(position=Point(x=trans.translation.x, y=trans.translation.y, z=trans.translation.z), orientation=trans.rotation)
-        self.cam_to_world = tf_conversions.toMatrix(tf_conversions.fromMsg(pose))
+        self.tfBuffer = tf2_ros.Buffer()
+        tf2_ros.TransformListener(self.tfBuffer)
+        
         # print("Cam to World", self.cam_to_world)
+        self.tracker = Tracker(distance_function='euclidean', distance_threshold=DIST_THRESHOLD_BETWEEN_FRAMES, hit_counter_max=HIT_COUNTER_MAX)
 
+    def _get_cam_transform(self):
+        trans = self.tfBuffer.lookup_transform("panda_link0", "camera_depth_optical_frame", rospy.Time(), rospy.Duration.from_sec(0.5)).transform
+        pose = Pose(position=Point(x=trans.translation.x, y=trans.translation.y, z=trans.translation.z), orientation=trans.rotation)
+        return tf_conversions.toMatrix(tf_conversions.fromMsg(pose))
 
     def _deproject_pixel_to_point_mm(self, x_cam, y_cam, depth):
         cam_frame_xy = np.array([x_cam, y_cam, 1])
@@ -136,7 +159,8 @@ class BumpkinPerception:
         return (x_mm, y_mm, z_mm)
 
     def callback(self, depth_msg, color_msg):
-        # rospy.loginfo("-----------------Callback loop-----------------")
+        global display_img
+        rospy.loginfo("-----------------Callback loop-----------------")
         try:
             self.depth_image = self.bridge.imgmsg_to_cv2(depth_msg, desired_encoding='passthrough')
             # print(self.depth_image.shape) #480,848 but 848 is width
@@ -149,22 +173,39 @@ class BumpkinPerception:
             self.combined_img = combined_image
 
             _frame = mp.Image(image_format=mp.ImageFormat.SRGB, data=self.color_image)
-            
-            centroids = self.model.predict(_frame)
+            centroids, bboxes = self.model.predict(_frame)
+            # print("\rCentroids: ", centroids)
+
             self.centroid_markers.clear()
             self.centroid_depths.clear()
-            for centroid in centroids:
-                x, y = int(centroid[0] * self.depth_image.shape[1])-1, int(centroid[1] * self.depth_image.shape[0])-1
-                # print("Centroid: ({},{})".format(centroid[0], centroid[1]))
-                # print("Hand centroid at: ({}, {})".format(x, y))
-                depth_value = self.depth_image[y, x] #test this
-                if depth_value == 0:
-                    continue
-                # print("Depth at centroid: {}".format(depth_value))
-                x_cam_mm, y_cam_mm, z_cam_mm = self._deproject_pixel_to_point_mm(x_cam=x, y_cam=y, depth=depth_value)
-                print("Pose in camera frame: ({:.3f}mm, {:.3f}mm, {:.3f}mm)".format(x_cam_mm, y_cam_mm, z_cam_mm))
 
-                x_world_m, y_world_m, z_world_m, _ = np.matmul(self.cam_to_world, np.array([x_cam_mm / 1000, y_cam_mm / 1000 , z_cam_mm / 1000, 1]))
+            cam_to_world = self._get_cam_transform()
+
+            norfair_detections = []
+            for centroid_idx in range(len(centroids)):
+                centroid = centroids[centroid_idx]
+                bbox = bboxes[centroid_idx]
+                x, y = int(centroid[0] * self.depth_image.shape[1])-1, int(centroid[1] * self.depth_image.shape[0])-1
+                depth_value = self.depth_image[y, x]
+
+                if depth_value == 0:
+                    print("Ignoring object at ({}, {}) with depth 0".format(x, y))
+                    cv2.rectangle(self.combined_img, (int(bbox[0] * color_image_resized.shape[1]), int(bbox[1] * color_image_resized.shape[0])), (int(bbox[2] * color_image_resized.shape[1]), int(bbox[3] * color_image_resized.shape[0])), (0, 0, 255), 2)
+                    continue
+                elif depth_value / 1000.0 > MAX_DIST_FROM_CAMERA:
+                    print("Ignoring object at ({}, {}) with depth {:.3f}m beyond max distance from camera".format(x, y, depth_value / 1000.0))
+                    cv2.rectangle(self.combined_img, (int(bbox[0] * color_image_resized.shape[1]), int(bbox[1] * color_image_resized.shape[0])), (int(bbox[2] * color_image_resized.shape[1]), int(bbox[3] * color_image_resized.shape[0])), (0, 0, 255), 2)
+                    continue
+
+                cv2.rectangle(self.combined_img, (int(bbox[0] * color_image_resized.shape[1]), int(bbox[1] * color_image_resized.shape[0])), (int(bbox[2] * color_image_resized.shape[1]), int(bbox[3] * color_image_resized.shape[0])), (0, 255, 0), 2)
+
+                print("Depth at centroid: {}".format(depth_value))
+                x_cam_mm, y_cam_mm, z_cam_mm = self._deproject_pixel_to_point_mm(x_cam=x, y_cam=y, depth=depth_value)
+                # print("Pose in camera frame: ({:.3f}mm, {:.3f}mm, {:.3f}mm)".format(x_cam_mm, y_cam_mm, z_cam_mm))
+
+                
+
+                x_world_m, y_world_m, z_world_m, _ = np.matmul(cam_to_world, np.array([x_cam_mm / 1000, y_cam_mm / 1000 , z_cam_mm / 1000, 1]))
                 print("Pose in world frame: ({:.3f}m, {:.3f}m, {:.3f}m)".format(x_world_m, y_world_m, z_world_m))
                 self.target = Point()
                             
@@ -176,7 +217,17 @@ class BumpkinPerception:
                 self.centroid_markers.append([int(color_image_resized.shape[1] * centroid[0]), int(color_image_resized.shape[0] * centroid[1])])
                 self.centroid_depths.append(depth_value)
 
-      
+                # Create a Norfair detection
+                norfair_detection = Detection(points=np.array([[int(color_image_resized.shape[1] * centroid[0]), int(color_image_resized.shape[0] * centroid[1])]]))
+                norfair_detections.append(norfair_detection)
+            # Update the tracker with the detections
+            self.tracker.update(detections=norfair_detections)
+            # Draw the tracked objects on the image
+            for tracked_object in self.tracker.tracked_objects:
+                for point in tracked_object.estimate:
+                    x, y = int(point[0]), int(point[1])
+                    cv2.circle(self.combined_img, (x, y), 5, (255, 0, 0), 2)
+            display_img = self.combined_img.copy()
             for idx in range(len(self.centroid_markers)):
                 x, y = self.centroid_markers[idx][0], self.centroid_markers[idx][1]
                 cv2.circle(self.combined_img, (x, y), 5, (0, 255, 0), 2)

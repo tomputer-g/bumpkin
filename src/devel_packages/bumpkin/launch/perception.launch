@@ -3,5 +3,7 @@
     </include>
     <node name="cam_transform" pkg="manipulation" type="realsense_tf_publisher.py" output="screen"/>
     <node name="new_perception_node" pkg="bumpkin" type="new_hand_landmarker.py" output="screen"/>
-
+    <include file="$(find manipulation)/launch/moveit.launch">
+        <!-- Need this for the TF / robot description -->
+    </include>
 </launch>

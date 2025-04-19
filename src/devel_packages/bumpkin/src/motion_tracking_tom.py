@@ -20,6 +20,10 @@ START_POSE = RigidTransform(
         from_frame="franka_tool",
         to_frame="world"
     )
+
+
+BOX_CORNER_MIN = np.array([0.46, -0.3, 0.2])
+BOX_CORNER_MAX = np.array([0.66, 0.3, 0.7])
 class BumpkinPlanner:
     
 
@@ -57,8 +61,26 @@ class BumpkinPlanner:
         # rospy.loginfo("Dynamic params setcurr_poseup")
 
     def set_goal(self, goal_msg):
+        self.goal_msg.x -= 0.3 #keep this dist from actual detection
+
+        if not self._check_valid_pose(goal_msg):
+            print("Invalid goal pose")
+            return
+    
         self.goal_msg = goal_msg
 
+    def _check_valid_pose(self, pose):
+        # Check if the pose is within the box corners
+        if np.any(np.isnan(pose.translation)) or np.any(np.isnan(pose.quaternion)):
+            print("Current pose has NaN")
+            return False
+
+        if (pose.translation < BOX_CORNER_MIN).any() or (pose.translation > BOX_CORNER_MAX).any():
+            print("Pose out of bounds")
+            return False
+
+        return True
+    
     def move(self, _timerEvent):
         current_pose = self.fa.get_pose()
 

@@ -21,8 +21,8 @@ from norfair import Detection, Tracker
 import time
 
 CHANNEL = "/target_pos"
-MAX_DIST_FROM_CAMERA = 0.6 #meters, beyond this distance from camera detections are ignored
-NUM_MAX_HANDS = 2
+MAX_DIST_FROM_CAMERA = 0.5 #meters, beyond this distance from camera detections are ignored
+NUM_MAX_HANDS = 1
 
 FPS = 30 #Should be same as realsense.launch definitions. Not to exceed 30 (mediapipe takes max 30ms)
 
@@ -85,13 +85,6 @@ def display_thread(perceptionThread):
             cv2.waitKey(1)
         rospy.sleep(1./FPS)
 
-def target_publisher(perceptionThread, topic=CHANNEL, rate=1):
-    target_pub = rospy.Publisher(topic, Point, queue_size=10)
-    target_pub_rate = rospy.Rate(rate)
-    while not rospy.is_shutdown():
-        if perceptionThread.target is not None:
-            target_pub.publish(perceptionThread.target)
-        target_pub_rate.sleep()
 
 def publish_point_tf(x, y, z):
     br = tf2_ros.StaticTransformBroadcaster()
@@ -126,8 +119,9 @@ class BumpkinPerception:
         display_thread_instance = threading.Thread(target=display_thread, args=(self,))
         display_thread_instance.start()
 
-        target_pub_thread_instance = threading.Thread(target=target_publisher, args=(self,))
-        target_pub_thread_instance.start()
+        # target_pub_thread_instance = threading.Thread(target=target_publisher, args=(self,))
+        # target_pub_thread_instance.start()
+        self.target_pub = rospy.Publisher('/target_pos', Point, queue_size=10)
 
         self.bridge = CvBridge()
         self.depth_sub = message_filters.Subscriber('/camera/depth/image_rect_raw', Image)
@@ -232,7 +226,7 @@ class BumpkinPerception:
                 x, y = self.centroid_markers[idx][0], self.centroid_markers[idx][1]
                 cv2.circle(self.combined_img, (x, y), 5, (0, 255, 0), 2)
                 cv2.putText(self.combined_img, f'Depth: {self.centroid_depths[idx]}', (x + 10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
-            
+            self.target_pub.publish(self.target)
             
         except Exception as e:
             rospy.logerr(e)

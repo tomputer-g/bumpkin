@@ -1,0 +1,4 @@
+<launch>
+    <node name="dummy_target_pub" pkg="bumpkin" type="dummy_perception.py" output="screen" />
+    <node name="motion" pkg="bumpkin" type="motion_tracking_tom.py" output="screen" />
+</launch>

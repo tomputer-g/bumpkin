@@ -4,7 +4,7 @@ from geometry_msgs.msg import Point
 import numpy as np
 import sys
 import threading
-from motion_tracking_franka import FrankaTrajectoryExecutor
+# from motion_tracking_franka import FrankaTrajectoryExecutor
 
 class GenerateDummyTraj(object):
     def __init__(self, pts):
@@ -59,14 +59,14 @@ if __name__ == '__main__':
 
     dummy_traj = GenerateDummyTraj(traj)
 
-    franka_executor = FrankaTrajectoryExecutor()
+    # franka_executor = FrankaTrajectoryExecutor()
 
     rospy.on_shutdown(dummy_traj.shutdown)
-    rospy.on_shutdown(franka_executor.shutdown)
+    # rospy.on_shutdown(franka_executor.shutdown)
 
-    thread = threading.Thread(target=franka_executor.run)
-    thread.daemon = True
-    thread.start()
+    # thread = threading.Thread(target=franka_executor.run)
+    # thread.daemon = True
+    # thread.start()
 
     try:
         while not rospy.is_shutdown():

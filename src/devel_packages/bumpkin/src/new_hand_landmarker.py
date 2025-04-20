@@ -54,6 +54,12 @@ class MediapipeWrapper():
         y_avg = min(1, max(0, y_avg))
         return (x_avg, y_avg)
     
+    def _get_middle_finger_feats(self, hand_landmarks):
+        # see https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker
+        mid_finger_mcp = hand_landmarks[9]
+        mid_finger_pip = hand_landmarks[10]
+        return [(mid_finger_mcp.x, mid_finger_mcp.y, mid_finger_mcp.z), (mid_finger_pip.x, mid_finger_pip.y, mid_finger_pip.z)]
+    
     def _get_hand_bbox(self, hand_landmarks):
         x_min = min([landmark.x for landmark in hand_landmarks])
         x_max = max([landmark.x for landmark in hand_landmarks])
@@ -71,11 +77,12 @@ class MediapipeWrapper():
         det_results_list = self.detector.detect(frame)
         det_centroids = []
         det_bboxes = []
+        det_middle_fings = []
         for i, det_results in enumerate(det_results_list.hand_landmarks):
             det_centroids.append(self._get_hand_centroid(det_results))
             det_bboxes.append(self._get_hand_bbox(det_results))
-
-        return det_centroids, det_bboxes
+            det_middle_fings.append(self._get_middle_finger_feats(det_results))
+        return det_centroids, det_bboxes, det_middle_fings
 
 display_img = None
 def display_thread(perceptionThread):
@@ -113,6 +120,7 @@ class BumpkinPerception:
 
         camera_info = rospy.wait_for_message('/camera/depth/camera_info', CameraInfo)
         self.intrinsic = np.array(camera_info.K).reshape((3, 3))
+        print(self.intrinsic)
         self.model = MediapipeWrapper()
         self.target = None
 
@@ -128,6 +136,8 @@ class BumpkinPerception:
         self.color_sub = message_filters.Subscriber('/camera/color/image_raw', Image)
         self.ts = message_filters.ApproximateTimeSynchronizer([self.depth_sub, self.color_sub], queue_size=15, slop=0.01)
         self.ts.registerCallback(self.callback)
+
+        self.real_world_mid_finger_esti = 0.098
         # Get camera transform
         self.tfBuffer = tf2_ros.Buffer()
         tf2_ros.TransformListener(self.tfBuffer)
@@ -151,6 +161,12 @@ class BumpkinPerception:
         z_mm = depth
 
         return (x_mm, y_mm, z_mm)
+    
+    def _get_est_depth_from_lengths(self, length_cam, length_real):
+        # fx and fy are the same
+        f = self.intrinsic[0][0]
+        depth = f * length_real / length_cam
+        return depth
 
     def callback(self, depth_msg, color_msg):
         global display_img
@@ -167,7 +183,7 @@ class BumpkinPerception:
             self.combined_img = combined_image
 
             _frame = mp.Image(image_format=mp.ImageFormat.SRGB, data=self.color_image)
-            centroids, bboxes = self.model.predict(_frame)
+            centroids, bboxes, middle_finger_stats = self.model.predict(_frame)
             # print("\rCentroids: ", centroids)
 
             self.centroid_markers.clear()
@@ -180,7 +196,49 @@ class BumpkinPerception:
                 centroid = centroids[centroid_idx]
                 bbox = bboxes[centroid_idx]
                 x, y = int(centroid[0] * self.depth_image.shape[1])-1, int(centroid[1] * self.depth_image.shape[0])-1
-                depth_value = self.depth_image[y, x]
+                # Get depth values in a 21x21 window around the centroid
+                depth_window = self.depth_image[max(0, y-10):min(self.depth_image.shape[0], y+11), 
+                                                max(0, x-10):min(self.depth_image.shape[1], x+11)]
+                median_depth_value = np.median(depth_window)
+                min_depth_value = np.min(depth_window)
+                depth_value = median_depth_value
+
+                print("median depth is", median_depth_value)
+                mid_finger_stats = middle_finger_stats[centroid_idx][0]
+                print(mid_finger_stats)
+                mid_finger_mcp_x, mid_finger_mcp_y, mid_finger_mcp_z =middle_finger_stats[centroid_idx][0]
+                
+                mid_finger_pip_x, mid_finger_pip_y, mid_finger_pip_z =middle_finger_stats[centroid_idx][1]
+                
+                # Estimate depth based on self.real_world_mid_finger_esti
+                px_length = (mid_finger_mcp_x - mid_finger_pip_x)**2 + (mid_finger_mcp_y - mid_finger_pip_y)**2 + (mid_finger_mcp_z - mid_finger_pip_z)**2
+                px_length = np.sqrt(px_length)
+                esti_depth = self._get_est_depth_from_lengths(length_cam=px_length, length_real=self.real_world_mid_finger_esti)
+                print("Estimated depth is", esti_depth)
+                # deproject
+                mid_finger_mcp_realw_x, mid_finger_mcp_realw_y, mid_finger_mcp_realw_z = self._deproject_pixel_to_point_mm(mid_finger_mcp_x, mid_finger_mcp_y, depth_value)
+                mid_finger_pip_realw_x, mid_finger_pip_realw_y, mid_finger_pip_realw_z = self._deproject_pixel_to_point_mm(mid_finger_pip_x, mid_finger_pip_y, depth_value)
+                print("realw dist", np.sqrt( (mid_finger_mcp_realw_x-mid_finger_pip_realw_x)**2 + (mid_finger_mcp_realw_y-mid_finger_pip_realw_y)**2 + (mid_finger_mcp_realw_z-mid_finger_pip_realw_z)**2))
+                
+                # print(mid_finger_stats)
+
+                # Middle finger 
+
+                """
+                Using the picture of a fist on a pipe here are the values (actual depth, inch | dist in percentage img)
+                4 in | 0.3826
+                6 in | 0.2708
+                8 in | 0.2544
+                10 in | 0.2169
+                12 in (with depth output 303mm) | 0.1777
+                14 in (with depth output 339mm) | 0.1255
+                """
+                if min_depth_value <= 0:
+                    print("Ignoring object at ({}, {}) due to invalid minimum depth in window".format(x, y))
+                    cv2.rectangle(self.combined_img, (int(bbox[0] * color_image_resized.shape[1]), int(bbox[1] * color_image_resized.shape[0])), (int(bbox[2] * color_image_resized.shape[1]), int(bbox[3] * color_image_resized.shape[0])), (0, 0, 255), 2)
+                    continue
+
+                # depth_value = self.depth_image[y, x]
 
                 if depth_value == 0:
                     print("Ignoring object at ({}, {}) with depth 0".format(x, y))

@@ -24,6 +24,12 @@ START_POSE = RigidTransform(
 
 BOX_CORNER_MIN = np.array([0.4, -0.3, 0.2])
 BOX_CORNER_MAX = np.array([0.66, 0.3, 0.8])
+
+# World frame, offset from actual hand detection
+X_OFFSET = -0.15
+Y_OFFSET = +0.05
+Z_OFFSET = +0.05
+BUMP_DIST = 0.25
 class BumpkinPlanner:
     
 
@@ -105,10 +111,10 @@ class BumpkinPlanner:
                 print("Lost goal pose")
                 self.state = 0
                 return
-            dist = np.linalg.norm(np.array([self.goal_msg.x - 0.15, self.goal_msg.y, self.goal_msg.z]) - 
+            dist = np.linalg.norm(np.array([self.goal_msg.x + X_OFFSET, self.goal_msg.y + Y_OFFSET, self.goal_msg.z + Z_OFFSET]) - 
               self.fa.get_pose().translation)
             print("Distance to goal: ", dist)
-            if dist < 0.1 and (time.time() - self.last_invalidpose_time > 1.0):
+            if dist < 0.05 and (time.time() - self.last_invalidpose_time > 1.0):
                 print("Reached goal pose")
                 self.state = 2
         elif self.state == 2:
@@ -130,12 +136,11 @@ class BumpkinPlanner:
         if self.goal_msg is None:
             goal_pose = current_pose
         else:
-            x_offset = 0.2
             goal_pose = RigidTransform(
                 translation=np.array([
-                    self.goal_msg.x - x_offset,
-                    self.goal_msg.y,
-                    self.goal_msg.z,
+                    self.goal_msg.x + X_OFFSET,
+                    self.goal_msg.y + Y_OFFSET,
+                    self.goal_msg.z + Z_OFFSET,
                 ]),
                 rotation=current_pose.rotation,
                 from_frame=current_pose.from_frame,
@@ -177,8 +182,8 @@ class BumpkinPlanner:
         self.fa.stop_skill()
         current_pose = self.fa.get_pose()
         bump_pose = current_pose.copy()
-        bump_pose.translation[0] += 0.3
-        self.fa.goto_pose(bump_pose, duration=3.0, use_impedance=True,
+        bump_pose.translation[0] += BUMP_DIST
+        self.fa.goto_pose(bump_pose, duration=4.0, use_impedance=True,
             cartesian_impedances=[600.0, 600.0, 600.0, 50.0, 50.0, 50.0], block=True)
         self.fa.goto_pose(START_POSE, duration=3.0, block=True)
         # sensed_ft = self.fa.get_ee_force_torque()

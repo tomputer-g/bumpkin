@@ -22,8 +22,8 @@ START_POSE = RigidTransform(
     )
 
 
-BOX_CORNER_MIN = np.array([0.46, -0.3, 0.2])
-BOX_CORNER_MAX = np.array([0.66, 0.3, 0.7])
+BOX_CORNER_MIN = np.array([0.4, -0.3, 0.2])
+BOX_CORNER_MAX = np.array([0.66, 0.3, 0.8])
 class BumpkinPlanner:
     
 
@@ -92,7 +92,7 @@ class BumpkinPlanner:
     
     def loop(self, _timerEvent):
         # print("Current state: ", self.state)
-        time.sleep(self.dt)
+        # time.sleep(self.dt)
         if self.state == 0:
             # looking for fist, NOT tracking
             if self.goal_msg is not None:

@@ -120,7 +120,7 @@ class BumpkinPerception:
 
         camera_info = rospy.wait_for_message('/camera/depth/camera_info', CameraInfo)
         self.intrinsic = np.array(camera_info.K).reshape((3, 3))
-        print(self.intrinsic)
+        # print(self.intrinsic)
         self.model = MediapipeWrapper()
         self.target = None
 
@@ -170,7 +170,7 @@ class BumpkinPerception:
 
     def callback(self, depth_msg, color_msg):
         global display_img
-        rospy.loginfo("-----------------Callback loop-----------------")
+        # rospy.loginfo("-----------------Callback loop-----------------")
         try:
             self.depth_image = self.bridge.imgmsg_to_cv2(depth_msg, desired_encoding='passthrough')
             # print(self.depth_image.shape) #480,848 but 848 is width
@@ -203,9 +203,9 @@ class BumpkinPerception:
                 min_depth_value = np.min(depth_window)
                 depth_value = median_depth_value
 
-                print("median depth is", median_depth_value)
+                # print("median depth is", median_depth_value)
                 mid_finger_stats = middle_finger_stats[centroid_idx][0]
-                print(mid_finger_stats)
+                # print(mid_finger_stats)
                 mid_finger_mcp_x, mid_finger_mcp_y, mid_finger_mcp_z =middle_finger_stats[centroid_idx][0]
                 mid_finger_pip_x, mid_finger_pip_y, mid_finger_pip_z =middle_finger_stats[centroid_idx][1]
                 
@@ -213,11 +213,11 @@ class BumpkinPerception:
                 px_length = (mid_finger_mcp_x - mid_finger_pip_x)**2 + (mid_finger_mcp_y - mid_finger_pip_y)**2 + (mid_finger_mcp_z - mid_finger_pip_z)**2
                 px_length = np.sqrt(px_length)
                 esti_depth = self._get_est_depth_from_lengths(length_cam=px_length, length_real=self.real_world_mid_finger_esti)
-                print("Estimated depth is", esti_depth)
+                # print("Estimated depth is", esti_depth)
                 # deproject
                 mid_finger_mcp_realw_x, mid_finger_mcp_realw_y, mid_finger_mcp_realw_z = self._deproject_pixel_to_point_mm(mid_finger_mcp_x, mid_finger_mcp_y, depth_value)
                 mid_finger_pip_realw_x, mid_finger_pip_realw_y, mid_finger_pip_realw_z = self._deproject_pixel_to_point_mm(mid_finger_pip_x, mid_finger_pip_y, depth_value)
-                print("realw dist", np.sqrt( (mid_finger_mcp_realw_x-mid_finger_pip_realw_x)**2 + (mid_finger_mcp_realw_y-mid_finger_pip_realw_y)**2 + (mid_finger_mcp_realw_z-mid_finger_pip_realw_z)**2))
+                # print("realw dist", np.sqrt( (mid_finger_mcp_realw_x-mid_finger_pip_realw_x)**2 + (mid_finger_mcp_realw_y-mid_finger_pip_realw_y)**2 + (mid_finger_mcp_realw_z-mid_finger_pip_realw_z)**2))
                 
                 # print(mid_finger_stats)
 
@@ -240,23 +240,23 @@ class BumpkinPerception:
                 # depth_value = self.depth_image[y, x]
 
 
-                if depth_value == 0 and esti_depth > 0:
-                    print("Using estimated depth")
-                    depth_value = esti_depth
+                # if depth_value == 0 and esti_depth > 0:
+                #     # print("Using estimated depth")
+                #     depth_value = esti_depth
 
 
                 if depth_value == 0:
-                    print("Ignoring object at ({}, {}) with depth 0".format(x, y))
+                    # print("Ignoring object at ({}, {}) with depth 0".format(x, y))
                     cv2.rectangle(self.combined_img, (int(bbox[0] * color_image_resized.shape[1]), int(bbox[1] * color_image_resized.shape[0])), (int(bbox[2] * color_image_resized.shape[1]), int(bbox[3] * color_image_resized.shape[0])), (0, 0, 255), 2)
                     continue
                 if depth_value / 1000.0 > MAX_DIST_FROM_CAMERA:
-                    print("Ignoring object at ({}, {}) with depth {:.3f}m beyond max distance from camera".format(x, y, depth_value / 1000.0))
+                    # print("Ignoring object at ({}, {}) with depth {:.3f}m beyond max distance from camera".format(x, y, depth_value / 1000.0))
                     cv2.rectangle(self.combined_img, (int(bbox[0] * color_image_resized.shape[1]), int(bbox[1] * color_image_resized.shape[0])), (int(bbox[2] * color_image_resized.shape[1]), int(bbox[3] * color_image_resized.shape[0])), (0, 0, 255), 2)
                     continue
 
                 cv2.rectangle(self.combined_img, (int(bbox[0] * color_image_resized.shape[1]), int(bbox[1] * color_image_resized.shape[0])), (int(bbox[2] * color_image_resized.shape[1]), int(bbox[3] * color_image_resized.shape[0])), (0, 255, 0), 2)
 
-                print("Depth at centroid: {}".format(depth_value))
+                # print("Depth at centroid: {}".format(depth_value))
                 x_cam_mm, y_cam_mm, z_cam_mm = self._deproject_pixel_to_point_mm(x_cam=x, y_cam=y, depth=depth_value)
                 # print("Pose in camera frame: ({:.3f}mm, {:.3f}mm, {:.3f}mm)".format(x_cam_mm, y_cam_mm, z_cam_mm))
 

@@ -13,7 +13,7 @@ from frankapy.proto import PosePositionSensorMessage, ShouldTerminateSensorMessa
 from franka_interface_msgs.msg import SensorDataGroup
 
 START_POSE = RigidTransform(
-        translation=np.array([0.25, 0, 0.55]),
+        translation=np.array([0.25, 0, 0.65]),
         rotation=np.array([[-0.00639471, -0.05183741,  0.99863506],
                             [ 0.69791764,  0.71496987,  0.04158193],
                             [-0.71614948,  0.69723093, 0.03160622]]),
@@ -45,7 +45,7 @@ class BumpkinPlanner:
         self.dt = 0.01
         # self.rate = rospy.Rate(1 / self.dt)
 
-        self.disp = 0.05
+        self.disp = 0.02
         self.init_time = rospy.Time.now().to_time() # retrieve current time
         self.id = 0 # further used when moving to catch point
 
@@ -88,9 +88,10 @@ class BumpkinPlanner:
         if self.goal_msg is None:
             goal_pose = current_pose
         else:
+            x_offset = 0.15
             goal_pose = RigidTransform(
                 translation=np.array([
-                    self.goal_msg.x,
+                    self.goal_msg.x - x_offset,
                     self.goal_msg.y,
                     self.goal_msg.z,
                 ]),

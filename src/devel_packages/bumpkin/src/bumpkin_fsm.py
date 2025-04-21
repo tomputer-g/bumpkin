@@ -91,7 +91,8 @@ class BumpkinPlanner:
         return True
     
     def loop(self, _timerEvent):
-        print("Current state: ", self.state)
+        # print("Current state: ", self.state)
+        time.sleep(self.dt)
         if self.state == 0:
             # looking for fist, NOT tracking
             if self.goal_msg is not None:
@@ -101,10 +102,13 @@ class BumpkinPlanner:
             # tracking fist
             self.move()
             if self.goal_msg is None:
-                # print("Lost goal pose")
+                print("Lost goal pose")
                 self.state = 0
-            elif (np.linalg.norm(np.array([self.goal_msg.x - 0.15, self.goal_msg.y, self.goal_msg.z]) - 
-              self.fa.get_pose().translation) < 0.05 and time.time() - self.last_invalidpose_time > 1.0):
+                return
+            dist = np.linalg.norm(np.array([self.goal_msg.x - 0.15, self.goal_msg.y, self.goal_msg.z]) - 
+              self.fa.get_pose().translation)
+            print("Distance to goal: ", dist)
+            if dist < 0.1 and (time.time() - self.last_invalidpose_time > 1.0):
                 print("Reached goal pose")
                 self.state = 2
         elif self.state == 2:
@@ -113,6 +117,7 @@ class BumpkinPlanner:
             if self.bump_complete:
                 # print("Bump complete")
                 self.bump_complete = False
+                self._dynamic_setup()
                 self.state = 0
         else:
             print("Unknown state, how did you get here?")
@@ -149,7 +154,7 @@ class BumpkinPlanner:
         waypoint.translation += delta
         timestamp = rospy.Time.now().to_time() - self.init_time
 
-        print("going to waypoint: ", waypoint.translation)
+        # print("going to waypoint: ", waypoint.translation)
 
         traj_gen_msg = PosePositionSensorMessage(
             id=self.id,
@@ -164,24 +169,25 @@ class BumpkinPlanner:
             )
         )
         self.pub.publish(ros_msg)
-        print("Published message")
+        # print("Published message")
         self.id += 1
 
     def bump(self):
         # print("Bumping")
+        self.fa.stop_skill()
         current_pose = self.fa.get_pose()
         bump_pose = current_pose.copy()
         bump_pose.translation[0] += 0.3
         self.fa.goto_pose(bump_pose, duration=3.0, use_impedance=True,
-            cartesian_impedances=[600.0, 600.0, 600.0, 50.0, 50.0, 50.0])
-        
-        sensed_ft = self.fa.get_ee_force_torque()
-        print("Sensed force: ", sensed_ft)
-        if np.linalg.norm(sensed_ft) > 2.0:
-            print("Bump detected")
-            self.goal_msg = None
-        else:
-            print("No bump detected")
+            cartesian_impedances=[600.0, 600.0, 600.0, 50.0, 50.0, 50.0], block=True)
+        self.fa.goto_pose(START_POSE, duration=3.0, block=True)
+        # sensed_ft = self.fa.get_ee_force_torque()
+        # print("Sensed force: ", sensed_ft)
+        # if np.linalg.norm(sensed_ft) > 2.0:
+        #     print("Bump detected")
+        #     self.goal_msg = None
+        # else:
+        #     print("No bump detected")
         self.bump_complete = True
 
 

@@ -13,7 +13,7 @@ from frankapy.proto import PosePositionSensorMessage, ShouldTerminateSensorMessa
 from franka_interface_msgs.msg import SensorDataGroup
 
 START_POSE = RigidTransform(
-        translation=np.array([0.45, 0, 0.55]),
+        translation=np.array([0.25, 0, 0.65]),
         rotation=np.array([[-0.00639471, -0.05183741,  0.99863506],
                             [ 0.69791764,  0.71496987,  0.04158193],
                             [-0.71614948,  0.69723093, 0.03160622]]),
@@ -45,13 +45,13 @@ class BumpkinPlanner:
         self.dt = 0.01
         # self.rate = rospy.Rate(1 / self.dt)
 
-        self.disp = 0.05
+        self.disp = 0.02
         self.init_time = rospy.Time.now().to_time() # retrieve current time
         self.id = 0 # further used when moving to catch point
 
         self.last_validpose_time = time.time()
         self.last_invalidpose_time = time.time()
-        self.state = 0
+        self.state = 1
         self.bump_complete = False 
         self.goal_msg = None
 
@@ -64,7 +64,7 @@ class BumpkinPlanner:
         # rospy.loginfo("Dynamic params setcurr_poseup")
 
     def set_goal(self, goal_msg):
-        # goal_msg.x -= 0.3 #keep this dist from actual detection
+        # self.goal_msg.x -= 0.3 #keep this dist from actual detection
 
         if not self._check_valid_pose(goal_msg):
             print("Invalid goal pose")
@@ -72,40 +72,41 @@ class BumpkinPlanner:
             self.goal_msg = None
             return
         
-        print("Got goal pose: ", goal_msg.x, goal_msg.y, goal_msg.z)
+        # print("Got goal pose: ", goal_msg.x, goal_msg.y, goal_msg.z)
         self.last_validpose_time = time.time()
     
         self.goal_msg = goal_msg
 
     def _check_valid_pose(self, goal_msg):
-        # Check if the pose is within the box corners
-        pose = np.array([goal_msg.x, goal_msg.y, goal_msg.z])
-        if np.any(np.isnan(pose)):
-            print("Current pose has NaN")
+        translation = [goal_msg.x, goal_msg.y, goal_msg.z]
+
+        if np.any(np.isnan(translation)):
+            print("Pose has NaN")
             return False
 
-        if (pose < BOX_CORNER_MIN).any() or (pose > BOX_CORNER_MAX).any():
+        if (translation < BOX_CORNER_MIN).any() or (translation > BOX_CORNER_MAX).any():
             print("Pose out of bounds")
             return False
 
         return True
     
-    def loop(self, _timerEvent):
+    def loop(self):
+        print("Current state: ", self.state)
         if self.state == 0:
             # looking for fist, NOT tracking
             if self.goal_msg is not None:
-                # print("Got goal pose: ", self.goal_msg.x, self.goal_msg.y, self.goal_msg.z)
+                print("Got goal pose: ", self.goal_msg.x, self.goal_msg.y, self.goal_msg.z)
                 self.state = 1
         elif self.state == 1:
             # tracking fist
             self.move()
-            # print("Moving to: ", self.goal_msg.x, self.goal_msg.y, self.goal_msg.z)
+            print("Moving to: ", self.goal_msg.x, self.goal_msg.y, self.goal_msg.z)
             if self.goal_msg is None:
                 # print("Lost goal pose")
                 self.state = 0
             elif (np.linalg.norm(np.array([self.goal_msg.x - 0.15, self.goal_msg.y, self.goal_msg.z]) - 
               self.fa.get_pose().translation) < 0.05 and time.time() - self.last_invalidpose_time > 1.0):
-                # print("Reached goal pose")
+                print("Reached goal pose")
                 self.state = 2
         elif self.state == 2:
             # reached goal pose, going in for bump
@@ -118,13 +119,14 @@ class BumpkinPlanner:
             print("Unknown state, how did you get here?")
             self.state = 0
 
-    def move(self, _timerEvent):
+    def move(self):
         current_pose = self.fa.get_pose()
+        current_pose.rotation = START_POSE.rotation
 
         if self.goal_msg is None:
             goal_pose = current_pose
         else:
-            x_offset = 0.3
+            x_offset = 0.2
             goal_pose = RigidTransform(
                 translation=np.array([
                     self.goal_msg.x - x_offset,
@@ -148,7 +150,7 @@ class BumpkinPlanner:
         waypoint.translation += delta
         timestamp = rospy.Time.now().to_time() - self.init_time
 
-        # print("going to waypoint: ", waypoint.translation)
+        print("going to waypoint: ", waypoint.translation)
 
         traj_gen_msg = PosePositionSensorMessage(
             id=self.id,
@@ -163,6 +165,7 @@ class BumpkinPlanner:
             )
         )
         self.pub.publish(ros_msg)
+        print("Published message")
         self.id += 1
 
     def bump(self):

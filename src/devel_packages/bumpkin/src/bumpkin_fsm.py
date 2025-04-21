@@ -90,7 +90,7 @@ class BumpkinPlanner:
 
         return True
     
-    def loop(self):
+    def loop(self, _timerEvent):
         print("Current state: ", self.state)
         if self.state == 0:
             # looking for fist, NOT tracking
@@ -100,7 +100,6 @@ class BumpkinPlanner:
         elif self.state == 1:
             # tracking fist
             self.move()
-            print("Moving to: ", self.goal_msg.x, self.goal_msg.y, self.goal_msg.z)
             if self.goal_msg is None:
                 # print("Lost goal pose")
                 self.state = 0

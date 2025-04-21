@@ -92,6 +92,25 @@ def display_thread(perceptionThread):
             cv2.waitKey(1)
         rospy.sleep(1./FPS)
 
+
+def publish_point_tf(x, y, z):
+    br = tf2_ros.StaticTransformBroadcaster()
+    t = TransformStamped()
+    
+    t.header.stamp = rospy.Time.now()
+    t.header.frame_id = "world"
+    t.child_frame_id = "target_point"
+    
+    t.transform.translation.x = x
+    t.transform.translation.y = y
+    t.transform.translation.z = z
+    
+    # No rotation (identity quaternion)
+    t.transform.rotation.w = 1.0
+    
+    br.sendTransform(t)
+    rospy.spin()
+
 class BumpkinPerception:
     def __init__(self):
 
@@ -151,7 +170,7 @@ class BumpkinPerception:
 
     def callback(self, depth_msg, color_msg):
         global display_img
-        rospy.logdebug("-----------------Callback loop-----------------")
+        rospy.loginfo("-----------------Callback loop-----------------")
         try:
             self.depth_image = self.bridge.imgmsg_to_cv2(depth_msg, desired_encoding='passthrough')
             # print(self.depth_image.shape) #480,848 but 848 is width
@@ -183,23 +202,22 @@ class BumpkinPerception:
                 median_depth_value = np.median(depth_window)
                 min_depth_value = np.min(depth_window)
                 depth_value = median_depth_value
-                rospy.logdebug("Depth value: {}".format(depth_value))
-                rospy.logdebug("median depth is", median_depth_value)
+
+                print("median depth is", median_depth_value)
                 mid_finger_stats = middle_finger_stats[centroid_idx][0]
-                rospy.logdebug(mid_finger_stats)
+                print(mid_finger_stats)
                 mid_finger_mcp_x, mid_finger_mcp_y, mid_finger_mcp_z =middle_finger_stats[centroid_idx][0]
-                
                 mid_finger_pip_x, mid_finger_pip_y, mid_finger_pip_z =middle_finger_stats[centroid_idx][1]
                 
                 # Estimate depth based on self.real_world_mid_finger_esti
                 px_length = (mid_finger_mcp_x - mid_finger_pip_x)**2 + (mid_finger_mcp_y - mid_finger_pip_y)**2 + (mid_finger_mcp_z - mid_finger_pip_z)**2
                 px_length = np.sqrt(px_length)
                 esti_depth = self._get_est_depth_from_lengths(length_cam=px_length, length_real=self.real_world_mid_finger_esti)
-                rospy.logdebug("Estimated depth is", esti_depth)
+                print("Estimated depth is", esti_depth)
                 # deproject
                 mid_finger_mcp_realw_x, mid_finger_mcp_realw_y, mid_finger_mcp_realw_z = self._deproject_pixel_to_point_mm(mid_finger_mcp_x, mid_finger_mcp_y, depth_value)
                 mid_finger_pip_realw_x, mid_finger_pip_realw_y, mid_finger_pip_realw_z = self._deproject_pixel_to_point_mm(mid_finger_pip_x, mid_finger_pip_y, depth_value)
-                rospy.logdebug("realw dist", np.sqrt( (mid_finger_mcp_realw_x-mid_finger_pip_realw_x)**2 + (mid_finger_mcp_realw_y-mid_finger_pip_realw_y)**2 + (mid_finger_mcp_realw_z-mid_finger_pip_realw_z)**2))
+                print("realw dist", np.sqrt( (mid_finger_mcp_realw_x-mid_finger_pip_realw_x)**2 + (mid_finger_mcp_realw_y-mid_finger_pip_realw_y)**2 + (mid_finger_mcp_realw_z-mid_finger_pip_realw_z)**2))
                 
                 # print(mid_finger_stats)
 
@@ -214,37 +232,45 @@ class BumpkinPerception:
                 12 in (with depth output 303mm) | 0.1777
                 14 in (with depth output 339mm) | 0.1255
                 """
-                if min_depth_value <= 0:
-                    rospy.logdebug("Ignoring object at ({}, {}) due to invalid minimum depth in window".format(x, y))
-                    cv2.rectangle(self.combined_img, (int(bbox[0] * color_image_resized.shape[1]), int(bbox[1] * color_image_resized.shape[0])), (int(bbox[2] * color_image_resized.shape[1]), int(bbox[3] * color_image_resized.shape[0])), (0, 0, 255), 2)
-                    continue
+                # if min_depth_value <= 0:
+                #     print("Ignoring object at ({}, {}) due to invalid minimum depth in window".format(x, y))
+                #     cv2.rectangle(self.combined_img, (int(bbox[0] * color_image_resized.shape[1]), int(bbox[1] * color_image_resized.shape[0])), (int(bbox[2] * color_image_resized.shape[1]), int(bbox[3] * color_image_resized.shape[0])), (0, 0, 255), 2)
+                #     continue
 
                 # depth_value = self.depth_image[y, x]
 
+
+                if depth_value == 0 and esti_depth > 0:
+                    print("Using estimated depth")
+                    depth_value = esti_depth
+
+
                 if depth_value == 0:
-                    rospy.logdebug("Ignoring object at ({}, {}) with depth 0".format(x, y))
+                    print("Ignoring object at ({}, {}) with depth 0".format(x, y))
                     cv2.rectangle(self.combined_img, (int(bbox[0] * color_image_resized.shape[1]), int(bbox[1] * color_image_resized.shape[0])), (int(bbox[2] * color_image_resized.shape[1]), int(bbox[3] * color_image_resized.shape[0])), (0, 0, 255), 2)
                     continue
-                elif depth_value / 1000.0 > MAX_DIST_FROM_CAMERA:
-                    rospy.logdebug("Ignoring object at ({}, {}) with depth {:.3f}m beyond max distance from camera".format(x, y, depth_value / 1000.0))
+                if depth_value / 1000.0 > MAX_DIST_FROM_CAMERA:
+                    print("Ignoring object at ({}, {}) with depth {:.3f}m beyond max distance from camera".format(x, y, depth_value / 1000.0))
                     cv2.rectangle(self.combined_img, (int(bbox[0] * color_image_resized.shape[1]), int(bbox[1] * color_image_resized.shape[0])), (int(bbox[2] * color_image_resized.shape[1]), int(bbox[3] * color_image_resized.shape[0])), (0, 0, 255), 2)
                     continue
 
                 cv2.rectangle(self.combined_img, (int(bbox[0] * color_image_resized.shape[1]), int(bbox[1] * color_image_resized.shape[0])), (int(bbox[2] * color_image_resized.shape[1]), int(bbox[3] * color_image_resized.shape[0])), (0, 255, 0), 2)
 
-                rospy.logdebug("Depth at centroid: {}".format(depth_value))
+                print("Depth at centroid: {}".format(depth_value))
                 x_cam_mm, y_cam_mm, z_cam_mm = self._deproject_pixel_to_point_mm(x_cam=x, y_cam=y, depth=depth_value)
                 # print("Pose in camera frame: ({:.3f}mm, {:.3f}mm, {:.3f}mm)".format(x_cam_mm, y_cam_mm, z_cam_mm))
 
                 
 
                 x_world_m, y_world_m, z_world_m, _ = np.matmul(cam_to_world, np.array([x_cam_mm / 1000, y_cam_mm / 1000 , z_cam_mm / 1000, 1]))
-                rospy.logdebug("Pose in world frame: ({:.3f}m, {:.3f}m, {:.3f}m)".format(x_world_m, y_world_m, z_world_m))
+                print("Pose in world frame: ({:.3f}m, {:.3f}m, {:.3f}m)".format(x_world_m, y_world_m, z_world_m))
                 self.target = Point()
                             
                 self.target.x = x_world_m
                 self.target.y = y_world_m
                 self.target.z = z_world_m
+                # publish_point_tf(x_world_m, y_world_m, z_world_m)
+                self.target_pub.publish(self.target)
 
                 self.centroid_markers.append([int(color_image_resized.shape[1] * centroid[0]), int(color_image_resized.shape[0] * centroid[1])])
                 self.centroid_depths.append(depth_value)
@@ -264,7 +290,7 @@ class BumpkinPerception:
                 x, y = self.centroid_markers[idx][0], self.centroid_markers[idx][1]
                 cv2.circle(self.combined_img, (x, y), 5, (0, 255, 0), 2)
                 cv2.putText(self.combined_img, f'Depth: {self.centroid_depths[idx]}', (x + 10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
-            self.target_pub.publish(self.target)
+            
             
         except Exception as e:
             rospy.logerr(e)

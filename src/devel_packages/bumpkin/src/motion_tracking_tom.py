@@ -22,7 +22,7 @@ START_POSE = RigidTransform(
     )
 
 
-BOX_CORNER_MIN = np.array([0.46, -0.3, 0.2])
+BOX_CORNER_MIN = np.array([0.4, -0.3, 0.2])
 BOX_CORNER_MAX = np.array([0.66, 0.3, 0.7])
 class BumpkinPlanner:
     
@@ -50,6 +50,9 @@ class BumpkinPlanner:
         self.id = 0 # further used when moving to catch point
 
         self.last_validpose_time = time.time()
+        self.last_invalidpose_time = time.time()
+        self.state = 0
+        self.bump_complete = False 
         self.goal_msg = None
 
         current = self.fa.get_pose()
@@ -61,26 +64,62 @@ class BumpkinPlanner:
         # rospy.loginfo("Dynamic params setcurr_poseup")
 
     def set_goal(self, goal_msg):
-        self.goal_msg.x -= 0.3 #keep this dist from actual detection
+        #goal_msg.x -= 0.2 #keep this dist from actual detection
 
         if not self._check_valid_pose(goal_msg):
-            print("Invalid goal pose")
+            self.last_invalidpose_time = time.time()
+            self.goal_msg = None
             return
+        
+        print("Got goal pose: ", goal_msg.x, goal_msg.y, goal_msg.z)
+        self.last_validpose_time = time.time()
     
         self.goal_msg = goal_msg
 
-    def _check_valid_pose(self, pose):
+    def _check_valid_pose(self, goal_msg):
         # Check if the pose is within the box corners
-        if np.any(np.isnan(pose.translation)) or np.any(np.isnan(pose.quaternion)):
+        pose = np.array([goal_msg.x, goal_msg.y, goal_msg.z])
+        if np.any(np.isnan(pose)):
             print("Current pose has NaN")
             return False
 
-        if (pose.translation < BOX_CORNER_MIN).any() or (pose.translation > BOX_CORNER_MAX).any():
-            print("Pose out of bounds")
+        if (pose < BOX_CORNER_MIN).any() or (pose > BOX_CORNER_MAX).any():
+            print("Pose out of bounds: ", pose)
             return False
 
         return True
     
+    def loop(self, _timerEvent):
+        if self.state == 0:
+            # looking for fist, NOT tracking
+            print("Looking for fist")
+            if time.time() - self.last_invalidpose_time > 1.0:
+                self.fa.goto_pose(START_POSE, block=True)
+            if self.goal_msg is not None:
+                print("Got goal pose: ", self.goal_msg.x, self.goal_msg.y, self.goal_msg.z)
+                self.state = 1
+        elif self.state == 1:
+            # tracking fist
+            self.move()
+            print("Tracking fist at: ", self.goal_msg.x, self.goal_msg.y, self.goal_msg.z)
+            if self.goal_msg is None:
+                # print("Lost goal pose")
+                self.state = 0
+            elif np.linalg.norm(np.array([self.goal_msg.x, self.goal_msg.y, self.goal_msg.z])-self.fa.get_pose().translation) < 0.1 and time.time() - self.last_invalidpose_time > 1.0:
+                # print("Reached goal pose")
+                self.state = 2
+        elif self.state == 2:
+            # reached goal pose, going in for bump
+            print("Reached goal pose, going in for bump")
+            self.bump()
+            if self.bump_complete:
+                print("Bump complete, resetting")
+                self.bump_complete = False
+                self.state = 0
+        else:
+            print("Unknown state, how did you get here?")
+            self.state = 0
+
     def move(self, _timerEvent):
         current_pose = self.fa.get_pose()
 
@@ -126,6 +165,25 @@ class BumpkinPlanner:
         )
         self.pub.publish(ros_msg)
         self.id += 1
+
+    def bump(self):
+        # print("Bumping")
+        current_pose = self.fa.get_pose()
+        bump_pose = current_pose.copy()
+        bump_pose.translation[0] += 0.3
+        self.fa.goto_pose(bump_pose, use_impedance=True,
+            cartesian_impedances=[600.0, 600.0, 600.0, 50.0, 50.0, 50.0])
+        
+        sensed_ft = self.fa.get_ee_force_torque()
+        print("Sensed force: ", sensed_ft)
+        if np.linalg.norm(sensed_ft) > 2.0:
+            print("Bump detected")
+            self.goal_msg = None
+        else:
+            print("No bump detected")
+        self.bump_complete = True
+        self.fa.goto_pose(START_POSE, block=True)
+
 
     def __init__(self):
         self.fa = FrankaArm(with_gripper=False)

@@ -40,6 +40,7 @@ if [ $? != 0 ]; then
     tmux send-keys -t $SESSION:5 'cd /home/student/ws_bumpkin/bumpkin' C-m
     tmux send-keys -t $SESSION:5 'bash ./terminal_docker.sh' C-m
     tmux send-keys -t $SESSION:5 'pip install mediapipe && cp src/devel_packages/bumpkin/src/hand_landmarker.task /root/.ros' C-m
+    tmux send-keys -t $SESSION:5 'pip install norfair[metrics,video]' C-m
 fi
 
 # Attach to the session

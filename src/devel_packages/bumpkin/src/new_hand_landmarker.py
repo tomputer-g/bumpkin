@@ -7,7 +7,6 @@ from sensor_msgs.msg import Image, CameraInfo
 import message_filters
 import threading
 import numpy as np
-from motion_tracking_franka import FrankaTrajectoryExecutor
 
 import tf2_ros
 import tf_conversions

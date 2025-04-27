@@ -124,7 +124,11 @@ class BumpkinPlanner:
                 # print("Bump complete")
                 self.bump_complete = False
                 self._dynamic_setup()
-                self.state = 0
+                self.state = 0          # TODO change this to 3 when 3 does something meaningful
+        elif self.state == 3:
+            # bump detected, going back to home pose
+            print("Bump detected, going back to home pose")
+            
         else:
             print("Unknown state, how did you get here?")
             self.state = 0
@@ -186,13 +190,13 @@ class BumpkinPlanner:
         self.fa.goto_pose(bump_pose, duration=4.0, use_impedance=True,
             cartesian_impedances=[600.0, 600.0, 600.0, 50.0, 50.0, 50.0], block=True)
         self.fa.goto_pose(START_POSE, duration=3.0, block=True)
-        # sensed_ft = self.fa.get_ee_force_torque()
-        # print("Sensed force: ", sensed_ft)
-        # if np.linalg.norm(sensed_ft) > 2.0:
-        #     print("Bump detected")
-        #     self.goal_msg = None
-        # else:
-        #     print("No bump detected")
+        sensed_ft = self.fa.get_ee_force_torque()
+        print("Sensed force: ", sensed_ft)
+        if np.linalg.norm(sensed_ft) > 2.0:
+            print("Bump detected")
+            self.goal_msg = None
+        else:
+            print("No bump detected")
         self.bump_complete = True
 
 

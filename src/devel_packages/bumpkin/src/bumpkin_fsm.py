@@ -61,6 +61,8 @@ class BumpkinPlanner:
         self.bump_complete = False 
         self.goal_msg = None
 
+        self.force_debug = True
+        self.bump_threshold_force = 2.0
         current = self.fa.get_pose()
         # print("Initial pose: ", current.translation) 
         self.fa.goto_pose(current, duration=self.dt, dynamic=True, buffer_time=500, block=False)
@@ -83,6 +85,11 @@ class BumpkinPlanner:
     
         self.goal_msg = goal_msg
 
+    def _print_force_debug(self, state_info):
+        if self.force_debug:
+            sensed_ft = self.fa.get_ee_force_torque()
+            print(f"Sensed norm in {state_info}", np.linalg.norm(sensed_ft))
+
     def _check_valid_pose(self, goal_msg):
         translation = [goal_msg.x, goal_msg.y, goal_msg.z]
 
@@ -100,10 +107,13 @@ class BumpkinPlanner:
         # print("Current state: ", self.state)
         # time.sleep(self.dt)
         if self.state == 0:
+            self._print_force_debug(" state 0 - pre tracking")
             # looking for fist, NOT tracking
             if self.goal_msg is not None:
                 print("Got goal pose: ", self.goal_msg.x, self.goal_msg.y, self.goal_msg.z)
                 self.state = 1
+                self._print_force_debug(" state 0 - post tracking")
+
         elif self.state == 1:
             # tracking fist
             self.move()
@@ -117,14 +127,18 @@ class BumpkinPlanner:
             if dist < 0.05 and (time.time() - self.last_invalidpose_time > 1.0):
                 print("Reached goal pose")
                 self.state = 2
+
         elif self.state == 2:
             # reached goal pose, going in for bump
             self.bump()
             if self.bump_complete:
                 # print("Bump complete")
                 self.bump_complete = False
-                self._dynamic_setup()
-                self.state = 0
+                self.state = 3          # TODO change this to 3 when 3 does something meaningful
+        elif self.state == 3:
+            self.balalala()
+            self._dynamic_setup()
+            self.state = 0
         else:
             print("Unknown state, how did you get here?")
             self.state = 0
@@ -159,6 +173,8 @@ class BumpkinPlanner:
         waypoint.translation += delta
         timestamp = rospy.Time.now().to_time() - self.init_time
 
+        self._print_force_debug(" state 1 - pre move msg")
+
         # print("going to waypoint: ", waypoint.translation)
 
         traj_gen_msg = PosePositionSensorMessage(
@@ -177,23 +193,48 @@ class BumpkinPlanner:
         # print("Published message")
         self.id += 1
 
+        self._print_force_debug(" state 1 - post tracking msg")
+
     def bump(self):
         # print("Bumping")
+
+        self._print_force_debug(" state 2 - pre skill stop")
         self.fa.stop_skill()
+        self._print_force_debug(" state 2 - post skill stop")
+
         current_pose = self.fa.get_pose()
         bump_pose = current_pose.copy()
         bump_pose.translation[0] += BUMP_DIST
         self.fa.goto_pose(bump_pose, duration=4.0, use_impedance=True,
             cartesian_impedances=[600.0, 600.0, 600.0, 50.0, 50.0, 50.0], block=True)
+        self._print_force_debug(" state 2 - between blocking moves")
         self.fa.goto_pose(START_POSE, duration=3.0, block=True)
-        # sensed_ft = self.fa.get_ee_force_torque()
-        # print("Sensed force: ", sensed_ft)
-        # if np.linalg.norm(sensed_ft) > 2.0:
-        #     print("Bump detected")
-        #     self.goal_msg = None
-        # else:
-        #     print("No bump detected")
+        sensed_ft = self.fa.get_ee_force_torque()
+        print("Sensed force: ", sensed_ft)
+        if np.linalg.norm(sensed_ft) > self.bump_threshold_force:
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!Bump detected!!!!!!!!!!!!!!!!!!!!!!!")
+            self.goal_msg = None
+        else:
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!No bump detected!!!!!!!!!!!!!!!!!!!!!!!!!")
         self.bump_complete = True
+
+    def balalala(self):
+        
+        ee_rotations = [-2.0, -2.5, -2.0, -2.30431303]
+        for idx in range(3):
+            self.fa.stop_skill()
+            current_pose = self.fa.get_pose()
+            bump_pose = current_pose.copy()
+            bump_pose.translation[0] -= BUMP_DIST/30
+            curr_joint_angles = self.fa.get_joints()
+            
+            curr_joint_angles[6] = ee_rotations[idx]
+            curr_joint_angles[1] -= 0.1
+
+            self.fa.goto_joints(curr_joint_angles, duration=1.0, block=True)
+            self.fa.stop_skill()
+
+
 
 
     def __init__(self):
